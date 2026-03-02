@@ -1,0 +1,96 @@
+# =============================================================================
+# Workflow: Create Dispatch Requests Index
+# Category: setup
+#
+# Creates the dispatch-requests index for async agent-to-agent dispatch.
+# Instead of agents blocking on synchronous Call Subagent calls, they
+# write a dispatch request here. The dispatch-monitor workflow polls
+# this index and invokes target agents independently, giving each agent
+# its own session, token budget, and timeout window.
+#
+# Author: Security Agent Mesh
+# =============================================================================
+name: Create Dispatch Requests Index
+description: Create the dispatch-requests index for async agent-to-agent dispatch.
+enabled: true
+
+tags:
+  - agent-mesh
+  - setup
+  - infrastructure
+
+triggers:
+  - type: manual
+
+consts:
+  es_url: "__ES_URL__"
+  es_api_key: "__ES_API_KEY__"
+  index_name: "dispatch-requests"
+
+steps:
+
+  - name: check_index_exists
+    type: http
+    with:
+      method: GET
+      url: "{{ consts.es_url }}/{{ consts.index_name }}"
+      headers:
+        Authorization: "ApiKey {{ consts.es_api_key }}"
+    on-failure:
+      continue: true
+
+  - name: create_or_skip
+    type: if
+    condition: 'steps.check_index_exists.status: "success"'
+    steps:
+
+      - name: already_exists
+        type: console
+        with:
+          message: "Index {{ consts.index_name }} already exists. Skipping creation."
+
+    else:
+
+      - name: create_index
+        type: http
+        with:
+          method: PUT
+          url: "{{ consts.es_url }}/{{ consts.index_name }}"
+          headers:
+            Content-Type: application/json
+            Authorization: "ApiKey {{ consts.es_api_key }}"
+          body:
+            settings:
+              number_of_shards: 1
+              number_of_replicas: 1
+            mappings:
+              properties:
+                dispatch_id:
+                  type: keyword
+                requesting_agent:
+                  type: keyword
+                target_agent:
+                  type: keyword
+                case_id:
+                  type: keyword
+                investigation_id:
+                  type: keyword
+                priority:
+                  type: keyword
+                context:
+                  type: text
+                status:
+                  type: keyword
+                created_at:
+                  type: date
+                dispatched_at:
+                  type: date
+                completed_at:
+                  type: date
+                result_summary:
+                  type: text
+
+      - name: confirm_creation
+        type: console
+        with:
+          message: "Dispatch requests index created. Agents can now write async dispatch requests."

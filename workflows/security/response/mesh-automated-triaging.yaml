@@ -10,7 +10,8 @@
 #   4. Records findings for audit
 #
 # L1 owns the escalation decision — if the alert warrants deeper
-# investigation, L1 calls L2 via its Call Subagent tool autonomously.
+# investigation, L1 dispatches L2 asynchronously via Dispatch Specialist.
+# L2 runs in its own independent session with a fresh timeout window.
 # The workflow does NOT force an L2 call.
 #
 # Uses event.alerts[0] to access the first alert from the trigger
@@ -148,7 +149,7 @@ steps:
           3. Add your findings as evidence to investigation {{ steps.investigation_doc_id.output }}
           4. If true positive: tag the alert, create a case, link the alert to it, and add a case comment with your triage summary
           5. If false positive: tag the alert, close it, and document why
-          6. If this is a true positive requiring deeper investigation, escalate to the L2 Investigation Analyst via Call Subagent — pass the case ID, investigation document ID ({{ steps.investigation_doc_id.output }}), alert details, and your analysis so L2 can continue on the same case
+          6. If this is a true positive requiring deeper investigation, escalate to the L2 Investigation Analyst via "Dispatch Specialist" (NOT Call Subagent). Provide: target_agent=security-mesh.l2-investigation-analyst, case_id, investigation_id={{ steps.investigation_doc_id.output }}, and in the context field include the case ID, alert details, host, severity, and your full analysis so L2 can continue on the same case. L2 will be invoked independently within 1-2 minutes.
     timeout: 600s
 
   - name: log_analyst_response

@@ -1,0 +1,178 @@
+# =============================================================================
+# Workflow: Dispatch Monitor
+# Category: mesh
+#
+# Scheduled workflow that polls the dispatch-requests index for pending
+# async agent dispatches. Each target agent is invoked in its own
+# independent session with a fresh token budget and timeout window.
+#
+# This breaks the synchronous chain: instead of L1 → L2 → TI nested
+# inside one workflow, each agent runs independently:
+#   L1 writes dispatch for L2 → L1 session ends
+#   Monitor invokes L2 → L2 writes dispatch for TI → L2 session ends
+#   Monitor invokes TI → TI completes → TI session ends
+#
+# Processes up to 3 dispatches per run. Runs every minute.
+# Urgent priority dispatches are processed first.
+#
+# Author: Security Agent Mesh
+# =============================================================================
+name: Dispatch Monitor
+description: Polls for pending async dispatch requests and invokes target agents independently.
+enabled: true
+
+tags:
+  - agent-mesh
+  - mesh
+  - scheduled
+
+triggers:
+  - type: schedule
+    interval: 1m
+
+consts:
+  es_url: "__ES_URL__"
+  es_api_key: "__ES_API_KEY__"
+  kibana_url: "__KIBANA_URL__"
+  kibana_space: "__KIBANA_SPACE__"
+  kibana_api_key: "__KIBANA_API_KEY__"
+  llm_connector_id: "__LLM_CONNECTOR_ID__"
+
+steps:
+
+  # ── Step 1: Find pending dispatch requests ──────────────────────────────
+  - name: find_pending
+    type: http
+    with:
+      method: POST
+      url: "{{ consts.es_url }}/dispatch-requests/_search"
+      headers:
+        Content-Type: application/json
+        Authorization: "ApiKey {{ consts.es_api_key }}"
+      body:
+        size: 3
+        query:
+          term:
+            status: "pending"
+        sort:
+          - priority:
+              order: "asc"
+              unmapped_type: "keyword"
+          - created_at: "asc"
+
+  # ── Step 2: Process each pending dispatch ───────────────────────────────
+  - name: process_dispatches
+    type: foreach
+    items: "{{ steps.find_pending.output.data.hits.hits }}"
+    steps:
+
+      # 2a. Mark as dispatched (prevents re-processing on next run)
+      - name: mark_dispatched
+        type: http
+        with:
+          method: POST
+          url: "{{ consts.es_url }}/dispatch-requests/_update/{{ item._id }}"
+          headers:
+            Content-Type: application/json
+            Authorization: "ApiKey {{ consts.es_api_key }}"
+          body:
+            doc:
+              status: "dispatched"
+              dispatched_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+
+      - name: log_dispatch
+        type: console
+        with:
+          message: "Dispatching {{ item._source.dispatch_id }} to {{ item._source.target_agent }}"
+
+      # 2b. Invoke the target agent with full context
+      - name: invoke_agent
+        type: http
+        on-failure:
+          continue: true
+        with:
+          method: POST
+          url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/agent_builder/converse"
+          headers:
+            Content-Type: application/json
+            Authorization: "ApiKey {{ consts.kibana_api_key }}"
+            kbn-xsrf: "true"
+          body:
+            agent_id: "{{ item._source.target_agent }}"
+            connector_id: "{{ consts.llm_connector_id }}"
+            input: "{{ item._source.context }}"
+          timeout: 600s
+
+      # 2c. Mark as completed (or failed if the agent call errored)
+      - name: check_success
+        type: if
+        condition: 'steps.invoke_agent.status: "success"'
+        steps:
+
+          - name: mark_completed
+            type: http
+            on-failure:
+              continue: true
+            with:
+              method: POST
+              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ item._id }}"
+              headers:
+                Content-Type: application/json
+                Authorization: "ApiKey {{ consts.es_api_key }}"
+              body:
+                doc:
+                  status: "completed"
+                  completed_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+                  result_summary: "Agent responded successfully."
+
+          - name: log_success
+            type: console
+            with:
+              message: "Dispatch {{ item._source.dispatch_id }} completed successfully."
+
+        else:
+
+          - name: mark_failed
+            type: http
+            on-failure:
+              continue: true
+            with:
+              method: POST
+              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ item._id }}"
+              headers:
+                Content-Type: application/json
+                Authorization: "ApiKey {{ consts.es_api_key }}"
+              body:
+                doc:
+                  status: "failed"
+                  completed_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+                  result_summary: "Agent call failed or timed out."
+
+          - name: log_failure
+            type: console
+            with:
+              message: "Dispatch {{ item._source.dispatch_id }} to {{ item._source.target_agent }} failed."
+
+          # Add a case comment if we have a case_id so the human knows
+          - name: notify_failure_on_case
+            type: http
+            on-failure:
+              continue: true
+            with:
+              method: POST
+              url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ item._source.case_id }}/comments"
+              headers:
+                Content-Type: application/json
+                Authorization: "ApiKey {{ consts.kibana_api_key }}"
+                kbn-xsrf: "true"
+                elastic-api-version: "2023-10-31"
+              body:
+                type: "user"
+                comment: |
+                  ## Agent Dispatch Failed
+
+                  **Dispatch ID:** {{ item._source.dispatch_id }}
+                  **Target Agent:** {{ item._source.target_agent }}
+
+                  The agent call failed or timed out. A human may need to investigate manually or retry.
+                owner: "securitySolution"

@@ -1,0 +1,92 @@
+# =============================================================================
+# Workflow: Dispatch Specialist (Async)
+# Category: mesh
+#
+# Writes an async dispatch request to the dispatch-requests index.
+# The dispatch-monitor workflow polls this index every minute and
+# invokes the target agent in its own independent session — no
+# synchronous blocking, no nested timeouts.
+#
+# Use this instead of Call Subagent when:
+#   - The calling agent doesn't need to wait for the result
+#   - The target agent's work is complex and may take several minutes
+#   - You're in an automated triage/investigation chain
+#
+# Keep using Call Subagent when:
+#   - A human is waiting for an immediate response (orchestrator flow)
+#   - The calling agent needs the result to continue its own work
+#
+# Author: Security Agent Mesh
+# =============================================================================
+name: Dispatch Specialist
+description: Queue an async dispatch request for a specialist agent.
+enabled: true
+
+tags:
+  - agent-mesh
+  - mesh
+  - async-dispatch
+
+triggers:
+  - type: manual
+
+inputs:
+  - name: target_agent
+    type: string
+    description: "Agent ID of the specialist to invoke"
+    required: true
+  - name: context
+    type: string
+    description: "Full instructions and context for the target agent (include case ID, investigation ID, alert details, and what you want the agent to do)"
+    required: true
+  - name: case_id
+    type: string
+    description: "Case ID for tracking (the target agent will also receive this in the context)"
+    required: false
+  - name: investigation_id
+    type: string
+    description: "Investigation document ID for tracking"
+    required: false
+  - name: requesting_agent
+    type: string
+    description: "Your agent ID (for audit trail)"
+    required: false
+  - name: priority
+    type: string
+    description: "Priority: urgent or normal. Urgent dispatches are processed first."
+    default: "normal"
+
+consts:
+  es_url: "__ES_URL__"
+  es_api_key: "__ES_API_KEY__"
+
+steps:
+
+  - name: generate_dispatch_id
+    type: console
+    with:
+      message: "dsp-{{ 'now' | date: '%s%N' }}"
+
+  - name: write_request
+    type: http
+    with:
+      method: POST
+      url: "{{ consts.es_url }}/dispatch-requests/_doc"
+      headers:
+        Content-Type: application/json
+        Authorization: "ApiKey {{ consts.es_api_key }}"
+      body:
+        dispatch_id: "{{ steps.generate_dispatch_id.output }}"
+        requesting_agent: "{{ inputs.requesting_agent | default: 'unknown' }}"
+        target_agent: "{{ inputs.target_agent }}"
+        case_id: "{{ inputs.case_id | default: '' }}"
+        investigation_id: "{{ inputs.investigation_id | default: '' }}"
+        priority: "{{ inputs.priority }}"
+        context: "{{ inputs.context }}"
+        status: "pending"
+        created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+
+  - name: confirm
+    type: console
+    with:
+      message: "Dispatch {{ steps.generate_dispatch_id.output }} queued for {{ inputs.target_agent }}. The dispatch monitor will invoke the agent within 1-2 minutes."
