@@ -56,7 +56,7 @@ steps:
           term:
             status: "pending"
         sort:
-          - priority:
+          - priority.keyword:
               order: "asc"
               unmapped_type: "keyword"
           - created_at: "asc"
