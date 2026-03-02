@@ -105,9 +105,12 @@ steps:
           timeout: 600s
 
       # 2c. Mark as completed (or failed if the agent call errored)
+      # Check the HTTP response status code, not the step-level status,
+      # because long-running agent calls may return 200 OK but report
+      # a non-"success" step status due to timeout-adjacent edge cases.
       - name: check_success
         type: if
-        condition: 'steps.invoke_agent.status: "success"'
+        condition: 'steps.invoke_agent.output.status: 200'
         steps:
 
           - name: mark_completed
