@@ -180,16 +180,17 @@ Elastic Cloud deployments include Claude connectors out of the box, along with o
 
 **a) Agent Builder UI** — select your LLM connector in the chat/model dropdown when opening each agent.
 
-**b) Workflows** — the Call Subagent, Orchestrator Router, and Mesh Automated Triaging workflows invoke agents programmatically and need a `connector_id`. Add it as `LLM_CONNECTOR_ID` in your GitHub Actions secrets (or export locally). Common built-in IDs:
+**b) Workflows** — the Call Subagent, Orchestrator Router, and Mesh Automated Triaging workflows invoke agents programmatically and need a `connector_id`. Add it as `LLM_CONNECTOR_ID` in your GitHub Actions secrets (or export locally).
 
-| Connector | ID |
-|-----------|-----|
-| Claude Opus 4.5 | `Anthropic-Claude-Opus-4-5` |
-| Claude Sonnet 4.5 | `Anthropic-Claude-Sonnet-4-5` |
-| Gemini 2.5 Pro | `Google-Gemini-2-5-Pro` |
-| GPT-5.2 | `OpenAI-GPT-5-2` |
+> **Important:** Available models and connector IDs change frequently as Elastic updates built-in connectors. Always verify your connector IDs by running this in Kibana Dev Tools:
+>
+> ```
+> GET kbn:/api/actions/connectors
+> ```
+>
+> Look for connectors with `actionTypeId: .gen-ai`, `.bedrock`, or `.gemini` in the response. The `id` field is what you need for `LLM_CONNECTOR_ID`.
 
-Run `GET kbn:/api/actions/connectors` in Kibana Dev Tools to see all available connectors and their IDs.
+We recommend a model that balances speed and tool-calling accuracy. Extended-thinking models (like Claude Opus 4.5) can exhaust the workflow timeout on complex multi-tool investigations. Faster models like **Claude Sonnet 4.5**, **Gemini 2.5 Pro**, or **GPT-4.1** are better suited for autonomous agent chains.
 
 #### Step 4: Sync Agents
 
