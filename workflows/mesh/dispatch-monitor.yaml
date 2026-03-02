@@ -64,7 +64,7 @@ steps:
   # ── Step 2: Process each pending dispatch ───────────────────────────────
   - name: process_dispatches
     type: foreach
-    items: "{{ steps.find_pending.output.data.hits.hits }}"
+    foreach: "{{ steps.find_pending.output.data.hits.hits }}"
     steps:
 
       # 2a. Mark as dispatched (prevents re-processing on next run)
@@ -72,7 +72,7 @@ steps:
         type: http
         with:
           method: POST
-          url: "{{ consts.es_url }}/dispatch-requests/_update/{{ item._id }}"
+          url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
           headers:
             Content-Type: application/json
             Authorization: "ApiKey {{ consts.es_api_key }}"
@@ -84,7 +84,7 @@ steps:
       - name: log_dispatch
         type: console
         with:
-          message: "Dispatching {{ item._source.dispatch_id }} to {{ item._source.target_agent }}"
+          message: "Dispatching {{ foreach.item._source.dispatch_id }} to {{ foreach.item._source.target_agent }}"
 
       # 2b. Invoke the target agent with full context
       - name: invoke_agent
@@ -99,9 +99,9 @@ steps:
             Authorization: "ApiKey {{ consts.kibana_api_key }}"
             kbn-xsrf: "true"
           body:
-            agent_id: "{{ item._source.target_agent }}"
+            agent_id: "{{ foreach.item._source.target_agent }}"
             connector_id: "{{ consts.llm_connector_id }}"
-            input: "{{ item._source.context }}"
+            input: "{{ foreach.item._source.context }}"
           timeout: 600s
 
       # 2c. Mark as completed (or failed if the agent call errored)
@@ -116,7 +116,7 @@ steps:
               continue: true
             with:
               method: POST
-              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ item._id }}"
+              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
               headers:
                 Content-Type: application/json
                 Authorization: "ApiKey {{ consts.es_api_key }}"
@@ -129,7 +129,7 @@ steps:
           - name: log_success
             type: console
             with:
-              message: "Dispatch {{ item._source.dispatch_id }} completed successfully."
+              message: "Dispatch {{ foreach.item._source.dispatch_id }} completed successfully."
 
         else:
 
@@ -139,7 +139,7 @@ steps:
               continue: true
             with:
               method: POST
-              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ item._id }}"
+              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
               headers:
                 Content-Type: application/json
                 Authorization: "ApiKey {{ consts.es_api_key }}"
@@ -152,7 +152,7 @@ steps:
           - name: log_failure
             type: console
             with:
-              message: "Dispatch {{ item._source.dispatch_id }} to {{ item._source.target_agent }} failed."
+              message: "Dispatch {{ foreach.item._source.dispatch_id }} to {{ foreach.item._source.target_agent }} failed."
 
           # Add a case comment if we have a case_id so the human knows
           - name: notify_failure_on_case
@@ -161,7 +161,7 @@ steps:
               continue: true
             with:
               method: POST
-              url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ item._source.case_id }}/comments"
+              url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ foreach.item._source.case_id }}/comments"
               headers:
                 Content-Type: application/json
                 Authorization: "ApiKey {{ consts.kibana_api_key }}"
@@ -172,8 +172,8 @@ steps:
                 comment: |
                   ## Agent Dispatch Failed
 
-                  **Dispatch ID:** {{ item._source.dispatch_id }}
-                  **Target Agent:** {{ item._source.target_agent }}
+                  **Dispatch ID:** {{ foreach.item._source.dispatch_id }}
+                  **Target Agent:** {{ foreach.item._source.target_agent }}
 
                   The agent call failed or timed out. A human may need to investigate manually or retry.
                 owner: "securitySolution"

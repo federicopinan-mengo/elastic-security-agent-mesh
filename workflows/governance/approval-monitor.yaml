@@ -10,10 +10,10 @@
 #   Agent requests approval → human reviews on case → monitor detects
 #   response → dispatches target agent → marks request as executed
 #
-# NOTE: The Liquid `contains` check on case comments relies on standard
-# Liquid string matching. If the workflow engine doesn't support {% %} tags,
-# replace the detect_decision step with an ai.agent step for natural
-# language understanding of the human response.
+# NOTE: The detect_decision step outputs the raw case comments response.
+# The if-condition checks are based on string matching in the output.
+# If KQL conditions don't support contains-style checks, replace the
+# detect_decision step with an ai.agent step for natural language parsing.
 #
 # Author: Security Agent Mesh
 # =============================================================================
@@ -66,7 +66,7 @@ steps:
   # ── Step 2: Process each pending request ────────────────────────────────
   - name: process_approvals
     type: foreach
-    items: "{{ steps.find_pending.output.data.hits.hits }}"
+    foreach: "{{ steps.find_pending.output.data.hits.hits }}"
     steps:
 
       # 2a. Fetch recent case comments
@@ -76,37 +76,35 @@ steps:
           continue: true
         with:
           method: GET
-          url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ item._source.case_id }}/comments/_find?sortOrder=desc&perPage=10"
+          url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ foreach.item._source.case_id }}/comments/_find?sortOrder=desc&perPage=10"
           headers:
             Authorization: "ApiKey {{ consts.kibana_api_key }}"
             kbn-xsrf: "true"
             elastic-api-version: "2023-10-31"
 
-      # 2b. Use Liquid to detect APPROVED/DENIED in comment text
-      # The response body is stringified and checked for keywords.
-      # Liquid {% if %} tags conditionally output the decision status.
-      - name: detect_decision
+      # 2b. Stringify case comments so KQL can search the text
+      - name: stringify_comments
         type: console
         with:
-          message: "{% assign body = steps.fetch_comments.output.data | json %}{% if body contains 'APPROVED' %}APPROVED{% elsif body contains 'DENIED' %}DENIED{% else %}PENDING{% endif %}"
+          message: "{{ steps.fetch_comments.output.data }}"
 
-      # 2c. Handle APPROVED decisions
+      # 2c. Handle APPROVED decisions (KQL phrase match on stringified comments)
       - name: handle_approved
         type: if
-        condition: 'steps.detect_decision.output: "APPROVED"'
+        condition: 'steps.stringify_comments.output: "APPROVED"'
         steps:
 
           - name: log_approval
             type: console
             with:
-              message: "Approval {{ item._source.approval_id }} APPROVED. Dispatching {{ item._source.target_agent }}."
+              message: "Approval {{ foreach.item._source.approval_id }} APPROVED. Dispatching {{ foreach.item._source.target_agent }}."
 
           # Update approval status to "approved"
           - name: mark_approved
             type: http
             with:
               method: POST
-              url: "{{ consts.es_url }}/approval-requests/_update/{{ item._id }}"
+              url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
               headers:
                 Content-Type: application/json
                 Authorization: "ApiKey {{ consts.es_api_key }}"
@@ -129,24 +127,24 @@ steps:
                 Authorization: "ApiKey {{ consts.kibana_api_key }}"
                 kbn-xsrf: "true"
               body:
-                agent_id: "{{ item._source.target_agent }}"
+                agent_id: "{{ foreach.item._source.target_agent }}"
                 connector_id: "{{ consts.llm_connector_id }}"
                 input: |
                   APPROVED ACTION — Execute the following approved action.
 
-                  Approval ID: {{ item._source.approval_id }}
-                  Case ID: {{ item._source.case_id }}
-                  Investigation ID: {{ item._source.investigation_id }}
-                  Action: {{ item._source.action_type }}
-                  Target: {{ item._source.target }}
-                  Risk Tier: {{ item._source.risk_tier }}
+                  Approval ID: {{ foreach.item._source.approval_id }}
+                  Case ID: {{ foreach.item._source.case_id }}
+                  Investigation ID: {{ foreach.item._source.investigation_id }}
+                  Action: {{ foreach.item._source.action_type }}
+                  Target: {{ foreach.item._source.target }}
+                  Risk Tier: {{ foreach.item._source.risk_tier }}
 
                   Context from the requesting agent:
-                  {{ item._source.context }}
+                  {{ foreach.item._source.context }}
 
                   Instructions:
                   1. Execute the approved action described above
-                  2. Add a case comment to {{ item._source.case_id }} documenting what was done and the result
+                  2. Add a case comment to {{ foreach.item._source.case_id }} documenting what was done and the result
                   3. If the action completes successfully, update the case with your findings
                   4. If the action fails, add a case comment explaining the failure
             timeout: 600s
@@ -158,14 +156,14 @@ steps:
               continue: true
             with:
               method: POST
-              url: "{{ consts.es_url }}/approval-requests/_update/{{ item._id }}"
+              url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
               headers:
                 Content-Type: application/json
                 Authorization: "ApiKey {{ consts.es_api_key }}"
               body:
                 doc:
                   status: "executed"
-                  execution_result: "Agent {{ item._source.target_agent }} dispatched successfully."
+                  execution_result: "Agent {{ foreach.item._source.target_agent }} dispatched successfully."
 
           # Add confirmation comment to case
           - name: add_executed_comment
@@ -174,7 +172,7 @@ steps:
               continue: true
             with:
               method: POST
-              url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ item._source.case_id }}/comments"
+              url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ foreach.item._source.case_id }}/comments"
               headers:
                 Content-Type: application/json
                 Authorization: "ApiKey {{ consts.kibana_api_key }}"
@@ -185,9 +183,9 @@ steps:
                 comment: |
                   ## Action Approved and Dispatched
 
-                  **Approval ID:** {{ item._source.approval_id }}
-                  **Action:** {{ item._source.action_type }} on {{ item._source.target }}
-                  **Dispatched to:** {{ item._source.target_agent }}
+                  **Approval ID:** {{ foreach.item._source.approval_id }}
+                  **Action:** {{ foreach.item._source.action_type }} on {{ foreach.item._source.target }}
+                  **Dispatched to:** {{ foreach.item._source.target_agent }}
 
                   The approved action has been dispatched to the target agent. Results will be posted as follow-up comments.
                 owner: "securitySolution"
@@ -197,19 +195,19 @@ steps:
 
           - name: handle_denied
             type: if
-            condition: 'steps.detect_decision.output: "DENIED"'
+            condition: 'steps.stringify_comments.output: "DENIED"'
             steps:
 
               - name: log_denial
                 type: console
                 with:
-                  message: "Approval {{ item._source.approval_id }} DENIED."
+                  message: "Approval {{ foreach.item._source.approval_id }} DENIED."
 
               - name: mark_denied
                 type: http
                 with:
                   method: POST
-                  url: "{{ consts.es_url }}/approval-requests/_update/{{ item._id }}"
+                  url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
                   headers:
                     Content-Type: application/json
                     Authorization: "ApiKey {{ consts.es_api_key }}"
@@ -225,7 +223,7 @@ steps:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ item._source.case_id }}/comments"
+                  url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ foreach.item._source.case_id }}/comments"
                   headers:
                     Content-Type: application/json
                     Authorization: "ApiKey {{ consts.kibana_api_key }}"
@@ -236,8 +234,8 @@ steps:
                     comment: |
                       ## Action Denied
 
-                      **Approval ID:** {{ item._source.approval_id }}
-                      **Action:** {{ item._source.action_type }} on {{ item._source.target }}
+                      **Approval ID:** {{ foreach.item._source.approval_id }}
+                      **Action:** {{ foreach.item._source.action_type }} on {{ foreach.item._source.target }}
 
                       This action was denied by a human reviewer. No action has been taken.
                     owner: "securitySolution"
@@ -248,4 +246,4 @@ steps:
               - name: log_still_pending
                 type: console
                 with:
-                  message: "Approval {{ item._source.approval_id }} still pending — no human response detected."
+                  message: "Approval {{ foreach.item._source.approval_id }} still pending — no human response detected."
