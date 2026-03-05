@@ -4,17 +4,23 @@
 #
 # Scheduled workflow that polls the approval-requests index for pending
 # requests, checks the associated Kibana case for a human APPROVED/DENIED
-# response, and dispatches the target agent when approved.
+# response, and queues a dispatch when approved.
 #
 # Runs every 2 minutes. Closes the governance loop:
 #   Agent requests approval → human reviews on case → monitor detects
-#   response → dispatches target agent → marks request as executed
+#   response → writes dispatch request → dispatch monitor invokes agent
 #
 # Detection strategy:
 #   1. Fetch the single most recent case comment
 #   2. Extract its text via Liquid (not the whole JSON blob)
 #   3. If the text matches the approval request template → still pending
 #   4. Otherwise check for APPROVED / DENIED via KQL wildcard
+#
+# Dispatch strategy:
+#   Instead of calling the agent directly (which blocks on 5+ min agent
+#   sessions and hits the gateway timeout), we write a dispatch request
+#   to the dispatch-requests index. The dispatch monitor picks it up
+#   within 1 minute and handles invocation, retry, and failure notification.
 #
 # Author: Security Agent Mesh
 # =============================================================================
@@ -38,7 +44,6 @@ consts:
   kibana_url: "__KIBANA_URL__"
   kibana_space: "__KIBANA_SPACE__"
   kibana_api_key: "__KIBANA_API_KEY__"
-  llm_connector_id: "__LLM_CONNECTOR_ID__"
 
 steps:
 
@@ -88,7 +93,6 @@ steps:
             elastic-api-version: "2023-10-31"
 
       # 2b. Extract ONLY the comment text field — not the entire JSON response.
-      #     This produces a short, clean string that KQL can match against.
       - name: latest_comment_text
         type: console
         on-failure:
@@ -102,8 +106,7 @@ steps:
           message: "Latest comment on case {{ foreach.item._source.case_id }}: {{ steps.latest_comment_text.output | truncate: 80 }}"
 
       # 2c. If the latest comment IS the approval request template, no one
-      #     has responded yet. The request template contains the unique phrase
-      #     "Human Approval Required" which no human response would include.
+      #     has responded yet.
       - name: check_is_approval_request
         type: if
         condition: 'steps.latest_comment_text.output: *Human Approval Required*'
@@ -125,7 +128,7 @@ steps:
               - name: log_approval
                 type: console
                 with:
-                  message: "Approval {{ foreach.item._source.approval_id }} APPROVED by human. Dispatching {{ foreach.item._source.target_agent }}."
+                  message: "Approval {{ foreach.item._source.approval_id }} APPROVED by human. Queuing dispatch for {{ foreach.item._source.target_agent }}."
 
               - name: mark_approved
                 type: http
@@ -141,21 +144,27 @@ steps:
                       resolved_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
                       resolved_by: "human"
 
-              - name: dispatch_agent
+              # Write a dispatch request instead of calling the agent directly.
+              # The dispatch monitor picks this up within 1 minute and handles
+              # invocation, retry, and failure notification.
+              - name: write_dispatch
                 type: http
                 on-failure:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/agent_builder/converse"
+                  url: "{{ consts.es_url }}/dispatch-requests/_doc"
                   headers:
                     Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.kibana_api_key }}"
-                    kbn-xsrf: "true"
+                    Authorization: "ApiKey {{ consts.es_api_key }}"
                   body:
-                    agent_id: "{{ foreach.item._source.target_agent }}"
-                    connector_id: "{{ consts.llm_connector_id }}"
-                    input: |
+                    dispatch_id: "apr-dispatch-{{ foreach.item._source.approval_id }}"
+                    requesting_agent: "approval-monitor"
+                    target_agent: "{{ foreach.item._source.target_agent }}"
+                    case_id: "{{ foreach.item._source.case_id }}"
+                    investigation_id: "{{ foreach.item._source.investigation_id }}"
+                    priority: "urgent"
+                    context: |
                       APPROVED ACTION — Execute the following approved action.
 
                       Approval ID: {{ foreach.item._source.approval_id }}
@@ -173,7 +182,8 @@ steps:
                       2. Add a case comment to {{ foreach.item._source.case_id }} documenting what was done and the result
                       3. If the action completes successfully, update the case with your findings
                       4. If the action fails, add a case comment explaining the failure
-                  timeout: 600s
+                    status: "pending"
+                    created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
               - name: mark_executed
                 type: http
@@ -188,7 +198,7 @@ steps:
                   body:
                     doc:
                       status: "executed"
-                      execution_result: "Agent {{ foreach.item._source.target_agent }} dispatched successfully."
+                      execution_result: "Dispatch request queued for {{ foreach.item._source.target_agent }}."
 
               - name: add_executed_comment
                 type: http
@@ -211,7 +221,7 @@ steps:
                       **Action:** {{ foreach.item._source.action_type }} on {{ foreach.item._source.target }}
                       **Dispatched to:** {{ foreach.item._source.target_agent }}
 
-                      The approved action has been dispatched to the target agent. Results will be posted as follow-up comments.
+                      The approved action has been queued for dispatch. The dispatch monitor will invoke the agent within 1 minute. Results will be posted as follow-up comments.
                     owner: "securitySolution"
 
             else:
@@ -266,7 +276,6 @@ steps:
 
                 else:
 
-                  # New comment but no recognizable keyword
                   - name: log_unrecognized
                     type: console
                     with:
