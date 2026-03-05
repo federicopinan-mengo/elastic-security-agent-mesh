@@ -6,6 +6,14 @@
 # completion, and retrieves the result. Uses explicit HTTP auth for
 # subagent chain reliability.
 #
+# Polling: ~2 minutes with escalating backoff (5s, 15s, 30s, 30s, 30s).
+# Short-circuits as soon as the command completes.
+#
+# Safety: If the execute step fails (endpoint offline, invalid ID, etc.),
+# the action ID is safely extracted via Liquid | default. A guard
+# condition skips polling entirely and reports the error immediately,
+# avoiding cascading 404s from null action IDs.
+#
 # NOTE: endpoint_ids must be an array. This workflow accepts a single
 # endpoint_id (string) and wraps it in a proper YAML array.
 #
@@ -59,129 +67,180 @@ steps:
           command: "{{ inputs.command }}"
           timeout: 600
 
-  # ── Poll for completion with escalating backoff ─────────────────────────
-  # Checks at 5s, 15s, 30s, 45s, 60s. Short-circuits as soon as the command completes.
-
-  - name: wait_1
-    type: wait
+  # ── Safe extraction of action ID ───────────────────────────────────────
+  # When execute_action fails (endpoint offline, bad ID, etc.),
+  # on-failure: continue sets output to null. Liquid | default prevents
+  # null propagation into polling URLs.
+  - name: action_id
+    type: console
     with:
-      duration: 5s
+      message: "{{ steps.execute_action.output.data.data.id | default: 'NO_ACTION' }}"
 
-  - name: check_1
-    type: http
-    on-failure:
-      continue: true
-    with:
-      method: GET
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.execute_action.output.data.data.id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
-
-  - name: poll_if_pending_1
+  # ── Guard: skip polling if execute failed ──────────────────────────────
+  - name: check_action_submitted
     type: if
-    condition: 'steps.check_1.output.data.data.isCompleted: "false"'
+    condition: 'steps.action_id.output: NO_ACTION'
     steps:
 
-      - name: wait_2
+      - name: output_error
+        type: console
+        with:
+          message: |
+            ERROR: Command execution failed — the endpoint may be offline, isolated, or the endpoint ID may be invalid.
+            Command: {{ inputs.command }}
+            Endpoint ID: {{ inputs.endpoint_id }}
+            The agent should note this failure in its case comment and try alternative investigation methods.
+
+    else:
+
+      # ── Poll for completion with escalating backoff ─────────────────────
+      # Total polling window: ~110 seconds (~2 minutes).
+      # Checks at: 5s, 20s, 50s, 80s, 110s.
+
+      - name: wait_1
         type: wait
         with:
-          duration: 10s
+          duration: 5s
 
-      - name: check_2
+      - name: check_1
         type: http
         on-failure:
           continue: true
         with:
           method: GET
-          url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.execute_action.output.data.data.id }}"
+          url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
           headers:
             Authorization: "ApiKey __KIBANA_API_KEY__"
             kbn-xsrf: "true"
             elastic-api-version: "2023-10-31"
 
-      - name: poll_if_pending_2
+      - name: poll_if_pending_1
         type: if
-        condition: 'steps.check_2.output.data.data.isCompleted: "false"'
+        condition: 'steps.check_1.output.data.data.isCompleted: "false"'
         steps:
 
-          - name: wait_3
+          - name: wait_2
             type: wait
             with:
               duration: 15s
 
-          - name: check_3
+          - name: check_2
             type: http
             on-failure:
               continue: true
             with:
               method: GET
-              url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.execute_action.output.data.data.id }}"
+              url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
               headers:
                 Authorization: "ApiKey __KIBANA_API_KEY__"
                 kbn-xsrf: "true"
                 elastic-api-version: "2023-10-31"
 
-          - name: poll_if_pending_3
+          - name: poll_if_pending_2
             type: if
-            condition: 'steps.check_3.output.data.data.isCompleted: "false"'
+            condition: 'steps.check_2.output.data.data.isCompleted: "false"'
             steps:
 
-              - name: wait_4
+              - name: wait_3
                 type: wait
                 with:
-                  duration: 15s
+                  duration: 30s
 
-              - name: check_4
+              - name: check_3
                 type: http
                 on-failure:
                   continue: true
                 with:
                   method: GET
-                  url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.execute_action.output.data.data.id }}"
+                  url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
                   headers:
                     Authorization: "ApiKey __KIBANA_API_KEY__"
                     kbn-xsrf: "true"
                     elastic-api-version: "2023-10-31"
 
-              - name: poll_if_pending_4
+              - name: poll_if_pending_3
                 type: if
-                condition: 'steps.check_4.output.data.data.isCompleted: "false"'
+                condition: 'steps.check_3.output.data.data.isCompleted: "false"'
                 steps:
 
-                  - name: wait_5
+                  - name: wait_4
                     type: wait
                     with:
-                      duration: 15s
+                      duration: 30s
 
-  # ── Final status check (always runs) ────────────────────────────────────
-  - name: get_action_status
-    type: http
-    on-failure:
-      continue: true
-    with:
-      method: GET
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.execute_action.output.data.data.id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
+                  - name: check_4
+                    type: http
+                    on-failure:
+                      continue: true
+                    with:
+                      method: GET
+                      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
+                      headers:
+                        Authorization: "ApiKey __KIBANA_API_KEY__"
+                        kbn-xsrf: "true"
+                        elastic-api-version: "2023-10-31"
 
-  - name: output_result
-    type: console
-    with:
-      message: |
-        Action ID: {{ steps.execute_action.output.data.data.id }}
-        Command: {{ inputs.command }}
-        Host: {{ steps.get_action_status.output.data.data.hosts[inputs.endpoint_id].name }}
-        Completed: {{ steps.get_action_status.output.data.data.isCompleted }}
-        Successful: {{ steps.get_action_status.output.data.data.wasSuccessful }}
-        Exit Code: {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.shell_code }}
-        Shell: {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.shell }}
+                  - name: poll_if_pending_4
+                    type: if
+                    condition: 'steps.check_4.output.data.data.isCompleted: "false"'
+                    steps:
 
-        === STDOUT ===
-        {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.stdout }}
+                      - name: wait_5
+                        type: wait
+                        with:
+                          duration: 30s
 
-        === STDERR ===
-        {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.stderr }}
+      # ── Final status check ─────────────────────────────────────────────
+      - name: get_action_status
+        type: http
+        on-failure:
+          continue: true
+        with:
+          method: GET
+          url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
+          headers:
+            Authorization: "ApiKey __KIBANA_API_KEY__"
+            kbn-xsrf: "true"
+            elastic-api-version: "2023-10-31"
+
+      # ── Safe extraction of completion status ───────────────────────────
+      - name: completed_status
+        type: console
+        with:
+          message: "{{ steps.get_action_status.output.data.data.isCompleted | default: 'unknown' }}"
+
+      - name: check_completed
+        type: if
+        condition: 'steps.completed_status.output: true'
+        steps:
+
+          - name: output_result
+            type: console
+            with:
+              message: |
+                Action ID: {{ steps.action_id.output }}
+                Command: {{ inputs.command }}
+                Host: {{ steps.get_action_status.output.data.data.hosts[inputs.endpoint_id].name | default: 'unknown' }}
+                Completed: {{ steps.get_action_status.output.data.data.isCompleted }}
+                Successful: {{ steps.get_action_status.output.data.data.wasSuccessful }}
+                Exit Code: {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.shell_code | default: 'N/A' }}
+                Shell: {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.shell | default: 'N/A' }}
+
+                === STDOUT ===
+                {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.stdout | default: '(empty)' }}
+
+                === STDERR ===
+                {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.stderr | default: '(empty)' }}
+
+        else:
+
+          - name: output_still_running
+            type: console
+            with:
+              message: |
+                Action ID: {{ steps.action_id.output }}
+                Command: {{ inputs.command }}
+                Endpoint ID: {{ inputs.endpoint_id }}
+                Status: STILL RUNNING after ~2 minutes of polling.
+                The command was submitted successfully but has not completed yet. The endpoint may be under heavy load.
+                The agent can check the result later using the action ID above, or proceed with other investigation steps.

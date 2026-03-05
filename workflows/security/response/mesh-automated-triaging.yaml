@@ -11,8 +11,11 @@
 #   5. Records findings for audit
 #
 # Deduplication: The _create call returns 409 if the investigation already
-# exists. When that happens, we skip the L1 call entirely — another
-# workflow run is already handling this alert.
+# exists. We check for SUCCESS (result: "created") rather than checking
+# for the 409 error code, because on-failure: continue sets the step
+# output to null — making error-code conditions unreliable. By checking
+# for the positive case, null output safely falls to the else (skip)
+# branch instead of accidentally proceeding.
 #
 # L1 owns the escalation decision — if the alert warrants deeper
 # investigation, L1 dispatches L2 asynchronously via Dispatch Specialist.
@@ -81,20 +84,24 @@ steps:
         created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
         updated_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
+  # ── Safe extraction of creation result ────────────────────────────────────
+  # When _create returns 409 (duplicate), on-failure: continue sets the step
+  # output to null. Accessing output.data.result on null would throw a
+  # TypeError in the KQL condition. The console step with Liquid | default
+  # safely extracts the result: "created" on success, "duplicate" on failure.
+  - name: creation_result
+    type: console
+    with:
+      message: "{{ steps.create_investigation.output.data.result | default: 'duplicate' }}"
+
   # ── Deduplication gate ────────────────────────────────────────────────────
-  # If _create returned 409, this alert is already being triaged elsewhere.
-  # Skip the L1 call to prevent duplicate cases.
-  - name: check_duplicate
+  # Only proceed with L1 if the investigation was genuinely new ("created").
+  # Any failure (409 duplicate, network error, etc.) produces "duplicate"
+  # via the default above → condition is FALSE → else branch skips L1.
+  - name: check_new_investigation
     type: if
-    condition: 'steps.create_investigation.output.status: 409'
+    condition: 'steps.creation_result.output: created'
     steps:
-
-      - name: log_duplicate
-        type: console
-        with:
-          message: "Investigation {{ steps.investigation_doc_id.output }} already exists — alert is already being triaged. Skipping duplicate."
-
-    else:
 
       - name: log_investigation_created
         type: console
@@ -205,3 +212,10 @@ steps:
                   references:
                     - "{{ event.alerts[0]._id }}"
                 now: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+
+    else:
+
+      - name: log_duplicate
+        type: console
+        with:
+          message: "Investigation {{ steps.investigation_doc_id.output }} already exists — alert is already being triaged. Skipping duplicate."
