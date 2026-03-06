@@ -18,8 +18,8 @@ Usage:
     python scripts/setup.py --seed-policies    # Only seed action policies
     python scripts/setup.py --tools-only       # Only create tools (requires workflows already imported)
     python scripts/setup.py --agents-only      # Only create agents (requires tools already created)
-    python scripts/setup.py --delete-workflows # Delete all workflows then re-import
-    python scripts/setup.py --delete-all       # Delete agents, tools, workflows, then full re-deploy
+    python scripts/setup.py --delete-workflows # (see note: manual deletion required)
+    python scripts/setup.py --delete-all       # Delete agents + tools, then full re-deploy (workflows: manual)
     python scripts/setup.py --validate         # Validate env vars without deploying
 
 Workflow placeholder tokens (replaced at import time with env var values):
@@ -1489,7 +1489,8 @@ def main():
     if args.delete_all:
         delete_agents()
         delete_tools()
-        delete_workflows()
+        print("\n  NOTE: Workflows must be deleted manually in Kibana before re-deploying.")
+        print("  Filter by the 'agent-mesh' tag, select all, and delete.\n")
         print("  Waiting 15s for deletions to propagate...\n")
         time.sleep(15)
         create_all_indices()
@@ -1507,9 +1508,10 @@ def main():
         return
 
     if args.delete_workflows:
-        delete_workflows()
-        if not (args.indices_only or args.workflows_only or args.seed_policies):
-            import_workflows()
+        print("  NOTE: Automated workflow deletion is unreliable — the API duplicates")
+        print("  instead of updating. Delete workflows manually in Kibana first:")
+        print("  Filter by 'agent-mesh' tag → select all → delete.\n")
+        print("  Then re-run with --workflows-only to re-import.\n")
         return
 
     if args.indices_only:

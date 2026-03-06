@@ -213,8 +213,7 @@ The script checks for each tool by ID. If `security-mesh.agent-registry`, `webse
 python scripts/setup.py                  # Full setup (Phase 1)
 python scripts/setup.py --validate       # Check environment variables only
 python scripts/setup.py --agents-only    # Re-sync agents with current tools (Phase 2)
-python scripts/setup.py --delete-all     # Delete agents, tools, and workflows, then re-deploy
-python scripts/setup.py --delete-workflows  # Delete workflows only, then re-import
+python scripts/setup.py --delete-all     # Delete agents and tools, then full re-deploy (see note on workflows)
 python scripts/setup.py --indices-only   # Only create indices (idempotent)
 python scripts/setup.py --workflows-only # Only import workflows
 python scripts/setup.py --tools-only     # Only create tools (requires workflows)
@@ -224,15 +223,15 @@ python scripts/setup.py --seed-knowledge # Seed operational knowledge (FP patter
 
 #### Re-deployment Notes
 
-**Workflows require manual deletion before re-import.** The Kibana Workflows API may reject updates to existing workflows. If you need to update workflows after making changes:
+**Workflows must be deleted manually before re-deploying.** The Kibana Workflows API creates new copies instead of updating existing ones, so re-running the import without deleting first will duplicate all workflows.
 
-1. In Kibana, navigate to **Workflows** and filter by the `agent-mesh` tag (all 57 workflows are tagged)
+To re-deploy:
+
+1. In Kibana, navigate to **Workflows** and filter by the `agent-mesh` tag
 2. Select all `agent-mesh` workflows and delete them
-3. Re-run `python scripts/setup.py --workflows-only` to re-import
+3. Re-run `python scripts/setup.py` (or `--delete-all` for a full teardown of agents and tools first)
 
-The `--delete-all` flag handles this automatically for full re-deploys. Agents, tools, and indices are idempotent — re-running the script updates them in place without manual deletion.
-
-> **Important:** The `--delete-all` and `--delete-workflows` flags delete **all** workflows in the target Kibana space, not just `agent-mesh` tagged ones. If you have other workflows in the same space, use the manual deletion approach above to selectively remove only `agent-mesh` workflows.
+Agents, tools, and indices are idempotent — re-running the script updates them in place without manual deletion. Only workflows require the manual step.
 
 #### Agents and Tools Reference
 
