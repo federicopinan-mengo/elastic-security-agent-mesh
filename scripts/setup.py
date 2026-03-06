@@ -706,18 +706,46 @@ def apply_replacements(yaml_content, replacements):
     return yaml_content
 
 
-def delete_workflows():
-    """Delete all workflows from Kibana so they can be re-imported cleanly.
+def _get_deployed_workflow_names():
+    """Build a set of workflow names from the YAML files we deploy.
 
-    Handles pagination by repeating the list+delete cycle until no
-    workflows remain or no progress is made.
+    Parses the 'name:' field from each YAML to identify which workflows
+    belong to this project. Only these will be targeted by delete operations.
     """
-    print("=== Deleting Existing Workflows ===\n")
+    import re
+    names = set()
+    for workflow_dir in WORKFLOW_DIRS:
+        dir_path = REPO_ROOT / workflow_dir
+        if not dir_path.exists():
+            continue
+        for yaml_file in sorted(dir_path.glob("*.yaml")):
+            with open(yaml_file) as f:
+                for line in f:
+                    m = re.match(r'^name:\s*(.+)', line)
+                    if m:
+                        names.add(m.group(1).strip().strip('"').strip("'"))
+                        break
+    return names
+
+
+def delete_workflows():
+    """Delete only mesh-deployed workflows from Kibana.
+
+    Builds the expected workflow name set from repo YAML files, then
+    deletes only matching workflows — leaving other workflows untouched.
+    Handles pagination by repeating the list+delete cycle until no
+    matching workflows remain.
+    """
+    print("=== Deleting Mesh Workflows ===\n")
+
+    our_names = _get_deployed_workflow_names()
+    print(f"  Found {len(our_names)} workflow names in repo\n")
 
     base_url = kibana_base_url()
     headers = kibana_headers()
 
     total_deleted = 0
+    total_skipped = 0
     total_errors = 0
 
     while True:
@@ -746,6 +774,10 @@ def delete_workflows():
             if not wf_id:
                 continue
 
+            if wf_name not in our_names:
+                total_skipped += 1
+                continue
+
             del_resp = requests.delete(
                 f"{base_url}/api/workflows/{wf_id}",
                 headers=headers,
@@ -764,7 +796,7 @@ def delete_workflows():
         if deleted_this_round == 0:
             break
 
-    print(f"\n  Deleted {total_deleted} workflows ({total_errors} errors)\n")
+    print(f"\n  Deleted {total_deleted} mesh workflows, skipped {total_skipped} other workflows ({total_errors} errors)\n")
 
 
 def import_workflows():
