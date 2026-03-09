@@ -143,48 +143,39 @@ steps:
               updated_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
       - name: invoke_analyst
-        type: http
+        type: ai.agent
         on-failure:
           continue: true
         with:
-          method: POST
-          url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/agent_builder/converse"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
-          body:
-            agent_id: "{{ steps.find_analyst_agent.output.data.hits.hits[0]._source.agent_id }}"
-            connector_id: "__LLM_CONNECTOR_ID__"
-            input: |
-              Triage this security alert. Investigation document ID: {{ steps.investigation_doc_id.output }}
+          agent_id: "{{ steps.find_analyst_agent.output.data.hits.hits[0]._source.agent_id }}"
+          message: |
+            Triage this security alert. Investigation document ID: {{ steps.investigation_doc_id.output }}
 
-              IMPORTANT: Do NOT search for this alert using Security Alerts — all context is provided below.
+            IMPORTANT: Do NOT search for this alert using Security Alerts — all context is provided below.
 
-              Alert Rule: {{ event.alerts[0].kibana.alert.rule.name }}
-              Alert ID: {{ event.alerts[0]._id }}
-              Severity: {{ event.alerts[0].kibana.alert.severity }}
-              Risk Score: {{ event.alerts[0].kibana.alert.risk_score }}
-              Host: {{ event.alerts[0].host.name }}
-              Rule Description: {{ event.alerts[0].kibana.alert.rule.description }}
+            Alert Rule: {{ event.alerts[0].kibana.alert.rule.name }}
+            Alert ID: {{ event.alerts[0]._id }}
+            Severity: {{ event.alerts[0].kibana.alert.severity }}
+            Risk Score: {{ event.alerts[0].kibana.alert.risk_score }}
+            Host: {{ event.alerts[0].host.name }}
+            Rule Description: {{ event.alerts[0].kibana.alert.rule.description }}
 
-              The L2 Investigation Analyst agent_id is: security-mesh.l2-investigation-analyst
+            The L2 Investigation Analyst agent_id is: security-mesh.l2-investigation-analyst
 
-              Instructions:
-              1. Analyse the alert context above — determine true positive or false positive
-              2. Search for similar past incidents and applicable playbooks using Semantic Knowledge Search
-              3. Add your findings as evidence to investigation {{ steps.investigation_doc_id.output }}
-              4. If true positive: tag the alert, create a case, link the alert to it, and add a case comment with your triage summary
-              5. If false positive: tag the alert, close it, and document why
-              6. If this is a true positive requiring deeper investigation, escalate to the L2 Investigation Analyst via "Dispatch Specialist" (NOT Call Subagent). Provide: target_agent=security-mesh.l2-investigation-analyst, case_id, investigation_id={{ steps.investigation_doc_id.output }}, and in the context field include the case ID, alert details, host, severity, and your full analysis so L2 can continue on the same case. L2 will be invoked independently within 1-2 minutes.
-          timeout: 600s
+            Instructions:
+            1. Analyse the alert context above — determine true positive or false positive
+            2. Search for similar past incidents and applicable playbooks using Semantic Knowledge Search
+            3. Add your findings as evidence to investigation {{ steps.investigation_doc_id.output }}
+            4. If true positive: tag the alert, create a case, link the alert to it, and add a case comment with your triage summary
+            5. If false positive: tag the alert, close it, and document why
+            6. If this is a true positive requiring deeper investigation, escalate to the L2 Investigation Analyst via "Dispatch Specialist" (NOT Call Subagent). Provide: target_agent=security-mesh.l2-investigation-analyst, case_id, investigation_id={{ steps.investigation_doc_id.output }}, and in the context field include the case ID, alert details, host, severity, and your full analysis so L2 can continue on the same case. L2 will be invoked independently within 1-2 minutes.
 
       - name: log_analyst_response
         type: console
         on-failure:
           continue: true
         with:
-          message: "L1 agent response: {{ steps.invoke_analyst.output.data.response.message }}"
+          message: "L1 agent response: {{ steps.invoke_analyst.output }}"
 
       - name: record_analyst_evidence
         type: http
@@ -207,7 +198,7 @@ steps:
                   agent_id: "{{ steps.find_analyst_agent.output.data.hits.hits[0]._source.agent_id }}"
                   timestamp: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
                   evidence_type: "finding"
-                  content: "{{ steps.invoke_analyst.output.data.response.message }}"
+                  content: "{{ steps.invoke_analyst.output }}"
                   confidence: 0.8
                   references:
                     - "{{ event.alerts[0]._id }}"

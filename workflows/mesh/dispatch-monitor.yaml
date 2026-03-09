@@ -37,7 +37,6 @@ consts:
   kibana_url: "__KIBANA_URL__"
   kibana_space: "__KIBANA_SPACE__"
   kibana_api_key: "__KIBANA_API_KEY__"
-  llm_connector_id: "__LLM_CONNECTOR_ID__"
 
 steps:
 
@@ -88,32 +87,93 @@ steps:
         with:
           message: "Dispatching {{ foreach.item._source.dispatch_id }} to {{ foreach.item._source.target_agent }}"
 
-      # 2b. Invoke the target agent with full context
+      # 2b. Invoke the target agent via ai.agent step (server-to-server,
+      # bypasses the 5-minute HTTP proxy timeout, gets full 30-min window).
       - name: invoke_agent
-        type: http
+        type: ai.agent
         on-failure:
           continue: true
         with:
-          method: POST
-          url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/agent_builder/converse"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.kibana_api_key }}"
-            kbn-xsrf: "true"
-          body:
-            agent_id: "{{ foreach.item._source.target_agent }}"
-            connector_id: "{{ consts.llm_connector_id }}"
-            input: "{{ foreach.item._source.context }}"
-          timeout: 600s
+          agent_id: "{{ foreach.item._source.target_agent }}"
+          message: "{{ foreach.item._source.context }}"
 
-      # 2c. Mark as completed (or failed if the agent call errored)
-      # Check the HTTP response status code, not the step-level status,
-      # because long-running agent calls may return 200 OK but report
-      # a non-"success" step status due to timeout-adjacent edge cases.
-      - name: check_success
+      # 2c. Detect success or failure.
+      # ai.agent returns the agent's text response on success.
+      # on-failure: continue sets output to null on failure.
+      # The console + default pattern safely extracts a testable value.
+      - name: agent_result
+        type: console
+        with:
+          message: "{{ steps.invoke_agent.output | default: 'AGENT_CALL_FAILED' }}"
+
+      - name: check_failed
         type: if
-        condition: 'steps.invoke_agent.output.status: 200'
+        condition: 'steps.agent_result.output: AGENT_CALL_FAILED'
         steps:
+
+          # Retry logic: increment retry_count and reset to pending if under
+          # the threshold (3 attempts). If at or over, mark as permanently
+          # failed and notify on the case.
+          - name: retry_or_fail
+            type: http
+            on-failure:
+              continue: true
+            with:
+              method: POST
+              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
+              headers:
+                Content-Type: application/json
+                Authorization: "ApiKey {{ consts.es_api_key }}"
+              body:
+                script:
+                  source: >
+                    int retries = ctx._source.containsKey('retry_count') ? ctx._source.retry_count : 0;
+                    retries++;
+                    ctx._source.retry_count = retries;
+                    if (retries >= 3) {
+                      ctx._source.status = 'failed';
+                      ctx._source.completed_at = params.now;
+                      ctx._source.result_summary = 'Agent call failed after 3 attempts.';
+                    } else {
+                      ctx._source.status = 'pending';
+                      ctx._source.result_summary = 'Attempt ' + retries + ' failed — will retry on next cycle.';
+                    }
+                  params:
+                    now: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+
+          - name: log_failure
+            type: console
+            with:
+              message: "Dispatch {{ foreach.item._source.dispatch_id }} to {{ foreach.item._source.target_agent }} failed — reset to pending for retry."
+
+          - name: check_retries_exhausted
+            type: if
+            condition: 'foreach.item._source.retry_count: 2'
+            steps:
+              - name: notify_failure_on_case
+                type: http
+                on-failure:
+                  continue: true
+                with:
+                  method: POST
+                  url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ foreach.item._source.case_id }}/comments"
+                  headers:
+                    Content-Type: application/json
+                    Authorization: "ApiKey {{ consts.kibana_api_key }}"
+                    kbn-xsrf: "true"
+                    elastic-api-version: "2023-10-31"
+                  body:
+                    type: "user"
+                    comment: |
+                      ## Agent Dispatch Failed After 3 Attempts
+
+                      **Dispatch ID:** {{ foreach.item._source.dispatch_id }}
+                      **Target Agent:** {{ foreach.item._source.target_agent }}
+
+                      The agent call failed 3 times (likely due to repeated timeouts or model errors). A human may need to investigate manually or retry by setting the dispatch status back to "pending" in the dispatch-requests index.
+                    owner: "securitySolution"
+
+        else:
 
           - name: mark_completed
             type: http
@@ -135,50 +195,3 @@ steps:
             type: console
             with:
               message: "Dispatch {{ foreach.item._source.dispatch_id }} completed successfully."
-
-        else:
-
-          - name: mark_failed
-            type: http
-            on-failure:
-              continue: true
-            with:
-              method: POST
-              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
-              headers:
-                Content-Type: application/json
-                Authorization: "ApiKey {{ consts.es_api_key }}"
-              body:
-                doc:
-                  status: "failed"
-                  completed_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
-                  result_summary: "Agent call failed or timed out."
-
-          - name: log_failure
-            type: console
-            with:
-              message: "Dispatch {{ foreach.item._source.dispatch_id }} to {{ foreach.item._source.target_agent }} failed."
-
-          # Add a case comment if we have a case_id so the human knows
-          - name: notify_failure_on_case
-            type: http
-            on-failure:
-              continue: true
-            with:
-              method: POST
-              url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ foreach.item._source.case_id }}/comments"
-              headers:
-                Content-Type: application/json
-                Authorization: "ApiKey {{ consts.kibana_api_key }}"
-                kbn-xsrf: "true"
-                elastic-api-version: "2023-10-31"
-              body:
-                type: "user"
-                comment: |
-                  ## Agent Dispatch Failed
-
-                  **Dispatch ID:** {{ foreach.item._source.dispatch_id }}
-                  **Target Agent:** {{ foreach.item._source.target_agent }}
-
-                  The agent call failed or timed out. A human may need to investigate manually or retry.
-                owner: "securitySolution"

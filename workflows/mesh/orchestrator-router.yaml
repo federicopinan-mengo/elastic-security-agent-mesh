@@ -73,24 +73,15 @@ steps:
             Score: {{ steps.find_agent.output.data.hits.hits[0]._score }}
 
       - name: invoke_specialist
-        type: http
+        type: ai.agent
         with:
-          method: POST
-          url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/agent_builder/converse"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
-          body:
-            agent_id: "{{ steps.find_agent.output.data.hits.hits[0]._source.agent_id }}"
-            connector_id: "__LLM_CONNECTOR_ID__"
-            input: "{{ inputs.request }}"
-        timeout: 600s
+          agent_id: "{{ steps.find_agent.output.data.hits.hits[0]._source.agent_id }}"
+          message: "{{ inputs.request }}"
 
       - name: output_response
         type: console
         with:
-          message: "{{ steps.invoke_specialist.output.data.response.message }}"
+          message: "{{ steps.invoke_specialist.output }}"
 
     else:
 

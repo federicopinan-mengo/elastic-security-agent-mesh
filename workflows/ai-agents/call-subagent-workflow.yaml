@@ -1,5 +1,5 @@
 name: Call Subagent Workflow
-description: Invoke a specialist agent via the Agent Builder converse API.
+description: Invoke a specialist agent via the ai.agent step type.
 enabled: true
 
 tags:
@@ -27,21 +27,12 @@ steps:
       message: "Calling agent={{ inputs.agent_id }}"
 
   - name: converse_with_agent
-    type: http
+    type: ai.agent
     with:
-      method: POST
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/agent_builder/converse"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-      body:
-        agent_id: "{{ inputs.agent_id }}"
-        connector_id: "__LLM_CONNECTOR_ID__"
-        input: "{{ inputs.question }}"
-    timeout: 600s
+      agent_id: "{{ inputs.agent_id }}"
+      message: "{{ inputs.question }}"
 
   - name: filter_output
     type: console
     with:
-      message: "{{ steps.converse_with_agent.output.data.response.message }}"
+      message: "{{ steps.converse_with_agent.output }}"

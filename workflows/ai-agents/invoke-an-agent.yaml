@@ -1,5 +1,5 @@
 name: Invoke an Agent
-description: Invoke an agent for alert triage via the Agent Builder converse API.
+description: Invoke an agent for alert triage via the ai.agent step type.
 enabled: true
 
 tags:
@@ -18,16 +18,7 @@ steps:
       message: "Alert event received, invoking triage agent"
 
   - name: invoke_triage_agent
-    type: http
+    type: ai.agent
     with:
-      method: POST
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/agent_builder/converse"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-      body:
-        agent_id: "security-mesh.l1-triage-analyst"
-        connector_id: "__LLM_CONNECTOR_ID__"
-        input: "Triage the following alert based on your system instructions: {{event | json}}"
-    timeout: 600s
+      agent_id: "security-mesh.l1-triage-analyst"
+      message: "Triage the following alert based on your system instructions: {{event | json}}"
