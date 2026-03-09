@@ -10,12 +10,13 @@
 #   4. Routes the alert to L1 with full context (no alert re-search needed)
 #   5. Records findings for audit
 #
-# Deduplication: The _create call returns 409 if the investigation already
-# exists. We check for SUCCESS (result: "created") rather than checking
-# for the 409 error code, because on-failure: continue sets the step
-# output to null — making error-code conditions unreliable. By checking
-# for the positive case, null output safely falls to the else (skip)
-# branch instead of accidentally proceeding.
+# Deduplication: The investigation ID includes both the alert _id and an
+# epoch timestamp. This means each alert firing gets its own investigation
+# (so repeat SSH brute force incidents over time are each investigated),
+# while the _create call still prevents rapid-fire duplicate triggers
+# within the same second. We check for SUCCESS (result: "created") rather
+# than checking for the 409 error code, because on-failure: continue sets
+# the step output to null — making error-code conditions unreliable.
 #
 # L1 owns the escalation decision — if the alert warrants deeper
 # investigation, L1 dispatches L2 asynchronously via Dispatch Specialist.
@@ -48,11 +49,15 @@ consts:
 
 steps:
 
-  # Deterministic ID prevents duplicate investigations if the same alert re-triggers
+  # Unique per alert firing: alert _id + epoch timestamp.
+  # Threshold rules reuse _id for the same grouping (e.g. same source IP +
+  # host), so _id alone would block all future alerts of the same type.
+  # Adding the epoch ensures each genuine firing gets its own investigation
+  # while same-second duplicate triggers still collide (safe dedup).
   - name: investigation_doc_id
     type: console
     with:
-      message: "inv-{{ event.alerts[0]._id }}"
+      message: "inv-{{ event.alerts[0]._id }}-{{ 'now' | date: '%s' }}"
 
   - name: create_investigation
     type: http
