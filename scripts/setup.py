@@ -1219,8 +1219,16 @@ def create_agents(tool_name_to_id):
             if tool.get("type") == "builtin":
                 builtin_id = tool.get("tool_id", "")
                 if builtin_id:
-                    tool_ids.append(builtin_id)
-                    builtin_tools.append(f"{tool['name']} → {builtin_id}")
+                    check = requests.get(
+                        f"{base_url}/api/agent_builder/tools/{builtin_id}",
+                        headers=headers,
+                        timeout=10,
+                    )
+                    if check.ok:
+                        tool_ids.append(builtin_id)
+                        builtin_tools.append(f"{tool['name']} → {builtin_id}")
+                    else:
+                        skipped_tools.append(f"{tool['name']} (Conector builtin no habilitado/encontrado)")
                 continue
 
             tid = tool_name_to_id.get(tool["name"])
@@ -1449,10 +1457,10 @@ def print_manual_steps():
     print("     (Claude Sonnet, GPT-4o, Gemini, or your preferred model)")
     print()
     print("  3. Seed knowledge bases (post-setup)")
-    print("     Populate kb-* indices with domain-specific data:")
-    print("     - kb-mitre-attack: MITRE ATT&CK techniques")
-    print("     - kb-ecs-schema: ECS field definitions")
-    print("     - kb-detection-rules: Existing detection rules")
+    print("     Populate kb-* indices with domain-specific data by running:")
+    print("     python scripts/setup.py --seed-all-knowledge")
+    print("     This will automatically fetch and index MITRE ATT&CK techniques,")
+    print("     ECS field definitions, and existing detection rules.")
     print()
 
 
@@ -1468,6 +1476,14 @@ def main():
                         help="Only create agents (requires tools already created)")
     parser.add_argument("--seed-knowledge", action="store_true",
                         help="Only seed operational knowledge (false positive patterns, playbooks)")
+    parser.add_argument("--seed-mitre", action="store_true",
+                        help="Seed MITRE ATT&CK data")
+    parser.add_argument("--seed-ecs", action="store_true",
+                        help="Seed ECS schema data")
+    parser.add_argument("--seed-rules", action="store_true",
+                        help="Seed Detection Rules data")
+    parser.add_argument("--seed-all-knowledge", action="store_true",
+                        help="Seed all knowledge bases (MITRE, ECS, Rules, Operational)")
     parser.add_argument("--delete-workflows", action="store_true",
                         help="Delete all workflows from Kibana before importing")
     parser.add_argument("--delete-all", action="store_true",
@@ -1526,8 +1542,36 @@ def main():
         seed_action_policies()
         return
 
+    # Add scripts/ to sys.path so we can import the seed scripts
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+    if args.seed_all_knowledge:
+        seed_operational_knowledge()
+        import seed_mitre
+        seed_mitre.main()
+        import seed_ecs
+        seed_ecs.main()
+        import seed_rules
+        seed_rules.main()
+        return
+
     if args.seed_knowledge:
         seed_operational_knowledge()
+        return
+
+    if args.seed_mitre:
+        import seed_mitre
+        seed_mitre.main()
+        return
+
+    if args.seed_ecs:
+        import seed_ecs
+        seed_ecs.main()
+        return
+
+    if args.seed_rules:
+        import seed_rules
+        seed_rules.main()
         return
 
     if args.tools_only:
