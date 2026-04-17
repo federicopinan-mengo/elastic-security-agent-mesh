@@ -1,4 +1,4 @@
-# Security Agent Mesh
+# Mengo Elastic SOC AI Agent 
 
 > This is a personal project and is not affiliated with Elastic officially. It builds on top of Elastic's platform but is independently developed and maintained.
 
