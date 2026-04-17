@@ -53,7 +53,7 @@ steps:
       continue: true
     with:
       method: POST
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/execute"
+      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/endpoint/action/execute"
       headers:
         Content-Type: application/json
         Authorization: "ApiKey __KIBANA_API_KEY__"
@@ -108,7 +108,7 @@ steps:
           continue: true
         with:
           method: GET
-          url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
+          url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/endpoint/action/{{ steps.action_id.output }}"
           headers:
             Authorization: "ApiKey __KIBANA_API_KEY__"
             kbn-xsrf: "true"
@@ -130,7 +130,7 @@ steps:
               continue: true
             with:
               method: GET
-              url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
+              url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/endpoint/action/{{ steps.action_id.output }}"
               headers:
                 Authorization: "ApiKey __KIBANA_API_KEY__"
                 kbn-xsrf: "true"
@@ -152,7 +152,7 @@ steps:
                   continue: true
                 with:
                   method: GET
-                  url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
+                  url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/endpoint/action/{{ steps.action_id.output }}"
                   headers:
                     Authorization: "ApiKey __KIBANA_API_KEY__"
                     kbn-xsrf: "true"
@@ -174,7 +174,7 @@ steps:
                       continue: true
                     with:
                       method: GET
-                      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
+                      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/endpoint/action/{{ steps.action_id.output }}"
                       headers:
                         Authorization: "ApiKey __KIBANA_API_KEY__"
                         kbn-xsrf: "true"
@@ -197,7 +197,7 @@ steps:
           continue: true
         with:
           method: GET
-          url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/endpoint/action/{{ steps.action_id.output }}"
+          url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/endpoint/action/{{ steps.action_id.output }}"
           headers:
             Authorization: "ApiKey __KIBANA_API_KEY__"
             kbn-xsrf: "true"

@@ -35,7 +35,7 @@ steps:
     type: http
     with:
       method: POST
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/cases/{{ inputs.case_id }}/comments"
+      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/cases/{{ inputs.case_id }}/comments"
       headers:
         Content-Type: application/json
         Authorization: "ApiKey __KIBANA_API_KEY__"

@@ -31,7 +31,7 @@ steps:
     type: http
     with:
       method: POST
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/detection_engine/signals/tags"
+      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/detection_engine/signals/tags"
       headers:
         Content-Type: application/json
         Authorization: "ApiKey __KIBANA_API_KEY__"

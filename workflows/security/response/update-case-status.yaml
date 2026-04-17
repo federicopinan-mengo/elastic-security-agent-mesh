@@ -39,7 +39,7 @@ steps:
     type: http
     with:
       method: GET
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/cases/{{ inputs.case_id }}"
+      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/cases/{{ inputs.case_id }}"
       headers:
         Authorization: "ApiKey __KIBANA_API_KEY__"
         kbn-xsrf: "true"
@@ -48,7 +48,7 @@ steps:
     type: http
     with:
       method: PATCH
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/cases"
+      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/cases"
       headers:
         Content-Type: application/json
         Authorization: "ApiKey __KIBANA_API_KEY__"

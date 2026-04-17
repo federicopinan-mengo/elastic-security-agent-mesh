@@ -35,7 +35,7 @@ steps:
     type: http
     with:
       method: PATCH
-      url: "__KIBANA_URL__/s/__KIBANA_SPACE__/api/note"
+      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/note"
       headers:
         Content-Type: application/json
         Authorization: "ApiKey __KIBANA_API_KEY__"
