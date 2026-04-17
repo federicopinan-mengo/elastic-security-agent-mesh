@@ -57,6 +57,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 REQUIRED_ENV_VARS = ["ELASTIC_CLOUD_URL", "KIBANA_URL", "ES_API_KEY", "KIBANA_API_KEY"]
 
+# kb-compliance excluded — uses compliance_mapping() (nested controls) instead of generic KB mapping
 KNOWLEDGE_BASE_INDICES = [
     "kb-detection-rules",
     "kb-ecs-schema",
@@ -66,7 +67,6 @@ KNOWLEDGE_BASE_INDICES = [
     "kb-incidents",
     "kb-playbooks",
     "kb-forensics",
-    "kb-compliance",
     "kb-soc-ops",
     "kb-runbooks",
 ]
@@ -74,11 +74,13 @@ KNOWLEDGE_BASE_INDICES = [
 WORKFLOW_DIRS = [
     "agents/setup",
     "workflows/ai-agents",
+    "workflows/compliance",
     "workflows/feedback",
     "workflows/governance",
     "workflows/investigation",
     "workflows/knowledge",
     "workflows/mesh",
+    "workflows/observability",
     "workflows/search",
     "workflows/security/detection",
     "workflows/security/enrichment",
@@ -332,6 +334,86 @@ def approval_requests_mapping():
     }
 
 
+def compliance_mapping():
+    """Mapping for kb-compliance — compliance evidence documents per framework."""
+    inference_id = os.environ.get("INFERENCE_ENDPOINT_ID", ".multilingual-e5-small-elasticsearch")
+    return {
+        "settings": {"number_of_shards": 1, "number_of_replicas": 1},
+        "mappings": {
+            "properties": {
+                "title": {"type": "text"},
+                "framework": {"type": "keyword"},
+                "period_start": {"type": "date"},
+                "period_end": {"type": "date"},
+                "overall_status": {"type": "keyword"},
+                "controls": {
+                    "type": "nested",
+                    "properties": {
+                        "control_id": {"type": "keyword"},
+                        "control_name": {"type": "text"},
+                        "status": {"type": "keyword"},
+                        "evidence": {
+                            "type": "object",
+                            "properties": {
+                                "active_rules": {"type": "integer"},
+                                "mitre_techniques_covered": {"type": "keyword"},
+                                "tp_alerts_30d": {"type": "integer"},
+                                "avg_response_time_hours": {"type": "float"},
+                            },
+                        },
+                        "gaps": {"type": "text"},
+                    },
+                },
+                "summary": {"type": "text"},
+                "semantic_summary": {
+                    "type": "semantic_text",
+                    "inference_id": inference_id,
+                },
+                "category": {"type": "keyword"},
+                "tags": {"type": "keyword"},
+                "created_at": {"type": "date"},
+            }
+        },
+    }
+
+
+def agent_metrics_mapping():
+    """Mapping for agent-metrics — time-series per-agent operational metrics."""
+    return {
+        "settings": {"number_of_shards": 1, "number_of_replicas": 1},
+        "mappings": {
+            "properties": {
+                "agent_id": {"type": "keyword"},
+                "agent_name": {"type": "text"},
+                "domain": {"type": "keyword"},
+                "period_start": {"type": "date"},
+                "period_end": {"type": "date"},
+                "decisions_total": {"type": "integer"},
+                "tp_classifications": {"type": "integer"},
+                "fp_classifications": {"type": "integer"},
+                "unknown_classifications": {"type": "integer"},
+                "escalations_to_l2": {"type": "integer"},
+                "cases_created": {"type": "integer"},
+                "alerts_closed": {"type": "integer"},
+                "avg_confidence": {"type": "float"},
+                "actions_by_tier": {
+                    "type": "object",
+                    "properties": {
+                        "tier_0_auto_approved": {"type": "integer"},
+                        "tier_1_low_risk": {"type": "integer"},
+                        "tier_2_approval_required": {"type": "integer"},
+                    },
+                },
+                "dispatch_pending": {"type": "integer"},
+                "dispatch_completed": {"type": "integer"},
+                "dispatch_failed": {"type": "integer"},
+                "period_hours": {"type": "integer"},
+                "created_at": {"type": "date"},
+            }
+        },
+    }
+
+
 def create_all_indices():
     print("=== Creating Indices ===\n")
 
@@ -354,6 +436,12 @@ def create_all_indices():
     kb_mapping = knowledge_base_mapping()
     for idx in KNOWLEDGE_BASE_INDICES:
         create_index(idx, kb_mapping)
+
+    print("\nCompliance evidence:")
+    create_index("kb-compliance", compliance_mapping())
+
+    print("\nAgent metrics:")
+    create_index("agent-metrics", agent_metrics_mapping())
 
     print()
 

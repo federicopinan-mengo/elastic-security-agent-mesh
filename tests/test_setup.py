@@ -52,14 +52,8 @@ class TestSlugify:
 
     def test_agent_name_kebab(self):
         """Known agent names in the project."""
-        assert (
-            slugify("Detection Engineering Agent")
-            == "security-mesh.detection-engineering-agent"
-        )
-        assert (
-            slugify("Threat Intelligence Agent")
-            == "security-mesh.threat-intelligence-agent"
-        )
+        assert slugify("Detection Engineering Agent") == "security-mesh.detection-engineering-agent"
+        assert slugify("Threat Intelligence Agent") == "security-mesh.threat-intelligence-agent"
         assert slugify("L1 Triage Analyst") == "security-mesh.l1-triage-analyst"
 
 
@@ -87,9 +81,7 @@ class TestBuildReplacements:
 
         assert replacements["__ES_URL__"] == "https://test.es.region.gcp.cloud.es.io"
         assert replacements["__ES_API_KEY__"] == "test-es-key"
-        assert (
-            replacements["__KIBANA_URL__"] == "https://test.kb.region.gcp.cloud.es.io"
-        )
+        assert replacements["__KIBANA_URL__"] == "https://test.kb.region.gcp.cloud.es.io"
         assert replacements["__KIBANA_API_KEY__"] == "test-kibana-key"
         assert replacements["__VT_API_KEY__"] == "vt-key"
         assert replacements["__ABUSEIPDB_API_KEY__"] == "abuse-key"
@@ -317,3 +309,95 @@ class TestInvestigationContextsMapping:
         assert "actions_taken" in props
         assert props["actions_taken"]["type"] == "nested"
         assert "pending_actions" in props
+
+
+# =============================================================================
+# Test: compliance_mapping
+# =============================================================================
+class TestComplianceMapping:
+    def test_mapping_has_nested_controls(self):
+        """kb-compliance has nested controls and semantic_text."""
+        from setup import compliance_mapping
+
+        mapping = compliance_mapping()
+        props = mapping["mappings"]["properties"]
+
+        assert "framework" in props
+        assert props["framework"]["type"] == "keyword"
+        assert "overall_status" in props
+        assert props["overall_status"]["type"] == "keyword"
+        assert "controls" in props
+        assert props["controls"]["type"] == "nested"
+        assert "semantic_summary" in props
+        assert props["semantic_summary"]["type"] == "semantic_text"
+
+    def test_controls_nested_has_required_fields(self):
+        """Nested controls structure has all required fields."""
+        from setup import compliance_mapping
+
+        mapping = compliance_mapping()
+        controls_props = mapping["mappings"]["properties"]["controls"]["properties"]
+
+        assert "control_id" in controls_props
+        assert controls_props["control_id"]["type"] == "keyword"
+        assert "control_name" in controls_props
+        assert "status" in controls_props
+        assert "evidence" in controls_props
+        assert controls_props["evidence"]["type"] == "object"
+
+
+# =============================================================================
+# Test: agent_metrics_mapping
+# =============================================================================
+class TestAgentMetricsMapping:
+    def test_mapping_has_all_metric_fields(self):
+        """agent-metrics has all required metric fields."""
+        from setup import agent_metrics_mapping
+
+        mapping = agent_metrics_mapping()
+        props = mapping["mappings"]["properties"]
+
+        required = [
+            "agent_id",
+            "agent_name",
+            "domain",
+            "period_start",
+            "period_end",
+            "decisions_total",
+            "tp_classifications",
+            "fp_classifications",
+            "escalations_to_l2",
+            "cases_created",
+            "alerts_closed",
+            "avg_confidence",
+            "actions_by_tier",
+            "dispatch_pending",
+            "dispatch_completed",
+            "dispatch_failed",
+            "period_hours",
+            "created_at",
+        ]
+        for field in required:
+            assert field in props, f"Missing required field: {field}"
+
+    def test_period_fields_are_date(self):
+        """period_start and period_end are date type for time-series queries."""
+        from setup import agent_metrics_mapping
+
+        mapping = agent_metrics_mapping()
+        props = mapping["mappings"]["properties"]
+
+        assert props["period_start"]["type"] == "date"
+        assert props["period_end"]["type"] == "date"
+        assert props["created_at"]["type"] == "date"
+
+    def test_actions_by_tier_has_tier_fields(self):
+        """actions_by_tier has tier breakdown fields."""
+        from setup import agent_metrics_mapping
+
+        mapping = agent_metrics_mapping()
+        tier_props = mapping["mappings"]["properties"]["actions_by_tier"]["properties"]
+
+        assert "tier_0_auto_approved" in tier_props
+        assert "tier_1_low_risk" in tier_props
+        assert "tier_2_approval_required" in tier_props
