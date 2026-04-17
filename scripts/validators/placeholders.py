@@ -15,9 +15,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
-
 # Placeholders that SHOULD be replaced by setup.py
 KNOWN_PLACEHOLDERS = {
     "__ES_URL__",
@@ -54,9 +51,7 @@ def check_file(yaml_path: Path) -> list[str]:
     if orphaned:
         # Deduplicate
         unique_orphaned = set(orphaned)
-        errors.append(
-            f"Found orphaned placeholder(s): {', '.join(sorted(unique_orphaned))}"
-        )
+        errors.append(f"Found orphaned placeholder(s): {', '.join(sorted(unique_orphaned))}")
 
     return errors
 
@@ -89,16 +84,20 @@ def main():
                 all_errors[str(rel_path)] = errors
 
     # --- Print results ---
-    print(f"\n--- Orphaned Placeholder Check ---")
+    print("\n--- Orphaned Placeholder Check ---")
     print(f"Checked {total_files} YAML files\n")
 
     if all_errors:
-        print(f"⚠️  Placeholders found in {len(all_errors)} files (expected — replaced at import time by setup.py):\n")
+        print(
+            f"⚠️  Placeholders found in {len(all_errors)} files (expected — replaced at import time by setup.py):\n"
+        )
         for path, errors in sorted(all_errors.items()):
             print(f"  ⚠️  {path}")
             for err in errors:
                 print(f"      - {err}")
-        print(f"\nℹ️  Note: {sum(len(e) for e in all_errors.values())} placeholder(s) found — these are intentional and will be replaced by setup.py during import")
+        print(
+            f"\nℹ️  Note: {sum(len(e) for e in all_errors.values())} placeholder(s) found — these are intentional and will be replaced by setup.py during import"
+        )
         sys.exit(0)  # Warning only, not a failure
     else:
         print(f"✅ No orphaned placeholders found in {total_files} files")

@@ -38,15 +38,13 @@ import os
 import re
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
     import requests
 except ImportError:
-    print(
-        "ERROR: 'requests' package required. Install with: pip install requests pyyaml"
-    )
+    print("ERROR: 'requests' package required. Install with: pip install requests pyyaml")
     sys.exit(1)
 
 try:
@@ -97,15 +95,13 @@ def validate_env():
         for v in missing:
             print(f"  - {v}")
         print()
-        print(
-            "Set these variables before running setup. See README.md for instructions."
-        )
+        print("Set these variables before running setup. See README.md for instructions.")
         sys.exit(1)
 
     print("Environment validated:")
     print(f"  Elasticsearch: {os.environ['ELASTIC_CLOUD_URL']}")
     print(f"  Kibana:        {os.environ['KIBANA_URL']}")
-    print(f"  Space:         default (hardcoded)")
+    print("  Space:         default (hardcoded)")
     print()
 
 
@@ -151,9 +147,7 @@ def create_index(index_name, mapping_body):
 
 
 def knowledge_base_mapping():
-    inference_id = os.environ.get(
-        "INFERENCE_ENDPOINT_ID", ".multilingual-e5-small-elasticsearch"
-    )
+    inference_id = os.environ.get("INFERENCE_ENDPOINT_ID", ".multilingual-e5-small-elasticsearch")
     return {
         "settings": {"number_of_shards": 1, "number_of_replicas": 1},
         "mappings": {
@@ -177,9 +171,7 @@ def knowledge_base_mapping():
 
 
 def agent_registry_mapping():
-    inference_id = os.environ.get(
-        "INFERENCE_ENDPOINT_ID", ".multilingual-e5-small-elasticsearch"
-    )
+    inference_id = os.environ.get("INFERENCE_ENDPOINT_ID", ".multilingual-e5-small-elasticsearch")
     return {
         "settings": {"number_of_shards": 1, "number_of_replicas": 1},
         "mappings": {
@@ -207,9 +199,7 @@ def agent_registry_mapping():
 
 
 def investigation_contexts_mapping():
-    inference_id = os.environ.get(
-        "INFERENCE_ENDPOINT_ID", ".multilingual-e5-small-elasticsearch"
-    )
+    inference_id = os.environ.get("INFERENCE_ENDPOINT_ID", ".multilingual-e5-small-elasticsearch")
     return {
         "settings": {"number_of_shards": 1, "number_of_replicas": 1},
         "mappings": {
@@ -505,9 +495,7 @@ def seed_action_policies():
     )
     if resp.ok:
         result = resp.json()
-        errors = sum(
-            1 for item in result.get("items", []) if item.get("index", {}).get("error")
-        )
+        errors = sum(1 for item in result.get("items", []) if item.get("index", {}).get("error"))
         total = len(result.get("items", []))
         print(f"  Seeded {total - errors}/{total} policies")
         if errors:
@@ -533,7 +521,7 @@ def seed_operational_knowledge():
         "Content-Type": "application/json",
         "Authorization": f"ApiKey {api_key}",
     }
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     documents = [
         {
@@ -685,9 +673,7 @@ def seed_operational_knowledge():
             result = resp.json().get("result", "unknown")
             print(f"  [OK] {doc['index']}/{doc['id']} ({result})")
         else:
-            print(
-                f"  [FAILED] {doc['index']}/{doc['id']}: {resp.status_code} — {resp.text[:200]}"
-            )
+            print(f"  [FAILED] {doc['index']}/{doc['id']}: {resp.status_code} — {resp.text[:200]}")
 
     print()
 
@@ -885,9 +871,7 @@ def import_workflows():
                         print(f"    [updated] {name}")
                         updated += 1
                     else:
-                        print(
-                            f"    [FAILED update] {yaml_file.name}: {put_resp.status_code}"
-                        )
+                        print(f"    [FAILED update] {yaml_file.name}: {put_resp.status_code}")
                         failed += 1
                 else:
                     print(f"    [skip] {yaml_file.name} (exists, no id returned)")
@@ -921,9 +905,7 @@ def fetch_existing_tool_ids():
     """Fetch name→ID mapping for already-created tools in Agent Builder."""
     base_url = kibana_base_url()
     headers = kibana_headers()
-    resp = requests.get(
-        f"{base_url}/api/agent_builder/tools", headers=headers, timeout=30
-    )
+    resp = requests.get(f"{base_url}/api/agent_builder/tools", headers=headers, timeout=30)
     if not resp.ok:
         print(f"  [WARN] Could not list tools: {resp.status_code}")
         return {}
@@ -1062,18 +1044,10 @@ def create_tools(workflow_name_to_id):
                 tool_name_to_id[tool_name] = tool_id
                 skipped += 1
             else:
-                print(
-                    f"    [MANUAL]  {tool_name} — index_search tools require UI creation"
-                )
-                print(
-                    f"              API response: {resp.status_code} — {resp.text[:300]}"
-                )
-                print(
-                    f"              Create manually: Agent Builder > Tools > New tool"
-                )
-                print(
-                    f"              Type: Index Search | Index: {index_name} | ID: {tool_id}"
-                )
+                print(f"    [MANUAL]  {tool_name} — index_search tools require UI creation")
+                print(f"              API response: {resp.status_code} — {resp.text[:300]}")
+                print("              Create manually: Agent Builder > Tools > New tool")
+                print(f"              Type: Index Search | Index: {index_name} | ID: {tool_id}")
                 failed += 1
             time.sleep(0.2)
             continue
@@ -1126,9 +1100,7 @@ def create_tools(workflow_name_to_id):
 
         time.sleep(0.2)
 
-    print(
-        f"\n  Total: {created} created, {updated} updated, {skipped} existing, {failed} failed\n"
-    )
+    print(f"\n  Total: {created} created, {updated} updated, {skipped} existing, {failed} failed\n")
     return tool_name_to_id
 
 
@@ -1177,16 +1149,12 @@ def delete_tools():
         elif del_resp.status_code == 404:
             pass
         else:
-            print(
-                f"    [FAILED] {tool_id}: {del_resp.status_code} — {del_resp.text[:200]}"
-            )
+            print(f"    [FAILED] {tool_id}: {del_resp.status_code} — {del_resp.text[:200]}")
             errors += 1
         time.sleep(0.1)
 
-    print(f"\n  Pass 2: checking for any remaining security-mesh tools via API...")
-    resp = requests.get(
-        f"{base_url}/api/agent_builder/tools", headers=headers, timeout=30
-    )
+    print("\n  Pass 2: checking for any remaining security-mesh tools via API...")
+    resp = requests.get(f"{base_url}/api/agent_builder/tools", headers=headers, timeout=30)
     if resp.ok:
         body = resp.json()
         tools_list = body if isinstance(body, list) else []
@@ -1285,15 +1253,11 @@ def create_agents(tool_name_to_id):
             for bt in builtin_tools:
                 print(f"              - {bt}")
         if fallback_tools:
-            print(
-                f"    [info] {agent_name}: {len(fallback_tools)} tool(s) resolved via fallback:"
-            )
+            print(f"    [info] {agent_name}: {len(fallback_tools)} tool(s) resolved via fallback:")
             for ft in fallback_tools:
                 print(f"           - {ft} → {slugify(ft)}")
         if skipped_tools:
-            print(
-                f"    [warn] {agent_name}: {len(skipped_tools)} tool(s) not found, skipped:"
-            )
+            print(f"    [warn] {agent_name}: {len(skipped_tools)} tool(s) not found, skipped:")
             for st in skipped_tools:
                 print(f"           - {st} (create manually in Agent Builder)")
 
@@ -1328,9 +1292,7 @@ def create_agents(tool_name_to_id):
                 timeout=30,
             )
             if put_resp.ok:
-                print(
-                    f"    [updated] {agent_name} ({agent_id}) — {len(tool_ids)} tools"
-                )
+                print(f"    [updated] {agent_name} ({agent_id}) — {len(tool_ids)} tools")
                 agent_name_to_id[agent_name] = agent_id
                 updated += 1
             else:
@@ -1344,9 +1306,7 @@ def create_agents(tool_name_to_id):
 
         time.sleep(0.3)
 
-    print(
-        f"\n  Total: {created} created, {updated} updated, {skipped} existing, {failed} failed\n"
-    )
+    print(f"\n  Total: {created} created, {updated} updated, {skipped} existing, {failed} failed\n")
     return agent_name_to_id
 
 
@@ -1374,9 +1334,7 @@ def delete_agents():
     deleted = 0
     errors = 0
 
-    print(
-        f"  Pass 1: deleting {len(expected_ids)} known agent IDs (dot + hyphen variants)..."
-    )
+    print(f"  Pass 1: deleting {len(expected_ids)} known agent IDs (dot + hyphen variants)...")
     for agent_id in sorted(expected_ids):
         del_resp = requests.delete(
             f"{base_url}/api/agent_builder/agents/{agent_id}",
@@ -1389,16 +1347,12 @@ def delete_agents():
         elif del_resp.status_code == 404:
             pass
         else:
-            print(
-                f"    [FAILED] {agent_id}: {del_resp.status_code} — {del_resp.text[:200]}"
-            )
+            print(f"    [FAILED] {agent_id}: {del_resp.status_code} — {del_resp.text[:200]}")
             errors += 1
         time.sleep(0.1)
 
-    print(f"\n  Pass 2: checking for any remaining security-mesh agents via API...")
-    resp = requests.get(
-        f"{base_url}/api/agent_builder/agents", headers=headers, timeout=30
-    )
+    print("\n  Pass 2: checking for any remaining security-mesh agents via API...")
+    resp = requests.get(f"{base_url}/api/agent_builder/agents", headers=headers, timeout=30)
     if resp.ok:
         body = resp.json()
         agents_list = body if isinstance(body, list) else []
@@ -1438,7 +1392,7 @@ def register_agents_in_mesh(agent_name_to_builder_id):
     print("=== Registering Agents in Mesh ===\n")
 
     agent_defs = load_agent_definitions()
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     bulk_body = ""
     count = 0
@@ -1483,9 +1437,7 @@ def register_agents_in_mesh(agent_name_to_builder_id):
 
     if resp.ok:
         result = resp.json()
-        errors = sum(
-            1 for item in result.get("items", []) if item.get("index", {}).get("error")
-        )
+        errors = sum(1 for item in result.get("items", []) if item.get("index", {}).get("error"))
         print(f"  Registered {count - errors}/{count} agents in mesh")
         if errors:
             for item in result.get("items", []):
@@ -1519,18 +1471,10 @@ def print_manual_steps():
 
 def main():
     parser = argparse.ArgumentParser(description="Elastic Security Agent Mesh setup")
-    parser.add_argument(
-        "--validate", action="store_true", help="Validate env vars only"
-    )
-    parser.add_argument(
-        "--indices-only", action="store_true", help="Only create indices"
-    )
-    parser.add_argument(
-        "--workflows-only", action="store_true", help="Only import workflows"
-    )
-    parser.add_argument(
-        "--seed-policies", action="store_true", help="Only seed action policies"
-    )
+    parser.add_argument("--validate", action="store_true", help="Validate env vars only")
+    parser.add_argument("--indices-only", action="store_true", help="Only create indices")
+    parser.add_argument("--workflows-only", action="store_true", help="Only import workflows")
+    parser.add_argument("--seed-policies", action="store_true", help="Only seed action policies")
     parser.add_argument(
         "--tools-only",
         action="store_true",
@@ -1546,13 +1490,9 @@ def main():
         action="store_true",
         help="Only seed operational knowledge (false positive patterns, playbooks)",
     )
-    parser.add_argument(
-        "--seed-mitre", action="store_true", help="Seed MITRE ATT&CK data"
-    )
+    parser.add_argument("--seed-mitre", action="store_true", help="Seed MITRE ATT&CK data")
     parser.add_argument("--seed-ecs", action="store_true", help="Seed ECS schema data")
-    parser.add_argument(
-        "--seed-rules", action="store_true", help="Seed Detection Rules data"
-    )
+    parser.add_argument("--seed-rules", action="store_true", help="Seed Detection Rules data")
     parser.add_argument(
         "--seed-all-knowledge",
         action="store_true",
@@ -1585,9 +1525,7 @@ def main():
     if args.delete_all:
         delete_agents()
         delete_tools()
-        print(
-            "\n  NOTE: Workflows must be deleted manually in Kibana before re-deploying."
-        )
+        print("\n  NOTE: Workflows must be deleted manually in Kibana before re-deploying.")
         print("  Filter by the 'agent-mesh' tag, select all, and delete.\n")
         print("  Waiting 15s for deletions to propagate...\n")
         time.sleep(15)

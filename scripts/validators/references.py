@@ -65,24 +65,13 @@ def main():
             if tool_type == "workflow":
                 wf_ref = tool.get("workflow", "")
                 if wf_ref:
-                    # Check file exists
-                    wf_path = (agent_file.parent.parent / wf_ref).resolve()
+                    # Workflow paths in agent YAML are relative to repo root
+                    wf_path = (repo_root / wf_ref).resolve()
                     if not wf_path.exists():
                         errors.append(
                             f"Agent '{agent_name}' tool '{tool_name}': "
                             f"workflow file not found: {wf_ref}"
                         )
-                    # Check workflow name matches
-                    else:
-                        try:
-                            with open(wf_path) as f:
-                                wf = yaml.safe_load(f)
-                                wf_name = wf.get("name", "") if wf else ""
-                                if wf_name and wf_name != tool.get("name"):
-                                    # Tool name doesn't need to match workflow name
-                                    pass
-                        except Exception:
-                            pass
 
     # --- Check dispatch-monitor references orchestrator-router ---
     dispatch_monitor = workflow_files.get("Dispatch Monitor")
@@ -95,18 +84,18 @@ def main():
         except Exception:
             pass
 
-    print(f"\n--- Reference Validation ---")
+    print("\n--- Reference Validation ---")
     print(
         f"Checked {len(workflow_files)} workflows, {len(list(agents_dir.glob('*.yaml')))} agents\n"
     )
 
     if errors:
-        print(f"❌ Reference errors found:\n")
+        print("❌ Reference errors found:\n")
         for err in errors:
             print(f"  - {err}")
         sys.exit(1)
     else:
-        print(f"✅ All references are valid")
+        print("✅ All references are valid")
         sys.exit(0)
 
 

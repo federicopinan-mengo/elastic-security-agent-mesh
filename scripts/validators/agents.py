@@ -15,7 +15,6 @@ from pathlib import Path
 
 import yaml
 
-
 REQUIRED_AGENT_FIELDS = {"agent_name", "domain", "system_instructions", "tools"}
 REQUIRED_TOOL_FIELDS = {"name"}
 VALID_TOOL_TYPES = {"workflow", "builtin", "index_search", "mcp"}
@@ -64,9 +63,7 @@ def validate_agent_yaml(yaml_path: Path, workflow_names: set[str]) -> list[str]:
             "soc_ops",
         }
         if domain not in valid_domains:
-            errors.append(
-                f"Invalid domain: '{domain}' (expected one of {valid_domains})"
-            )
+            errors.append(f"Invalid domain: '{domain}' (expected one of {valid_domains})")
 
     # --- system_instructions ---
     if "system_instructions" in agent:
@@ -126,9 +123,7 @@ def validate_agent_yaml(yaml_path: Path, workflow_names: set[str]) -> list[str]:
                         errors.append(f"Tool '{name}': builtin type requires 'tool_id'")
                 elif tool_type == "index_search":
                     if "index" not in tool:
-                        errors.append(
-                            f"Tool '{name}': index_search type requires 'index'"
-                        )
+                        errors.append(f"Tool '{name}': index_search type requires 'index'")
 
     # --- knowledge_bases ---
     if "knowledge_bases" in agent:
@@ -151,14 +146,12 @@ def validate_agent_yaml(yaml_path: Path, workflow_names: set[str]) -> list[str]:
             }
             for kb in kbs:
                 if not isinstance(kb, dict):
-                    errors.append(f"Knowledge base entry must be a dictionary")
+                    errors.append("Knowledge base entry must be a dictionary")
                     continue
                 if "index" in kb:
                     idx = kb["index"]
                     if idx not in valid_kb_indices:
-                        errors.append(
-                            f"Knowledge base index '{idx}' not in standard list (kb-*)"
-                        )
+                        errors.append(f"Knowledge base index '{idx}' not in standard list (kb-*)")
 
     # --- registry_entry ---
     if "registry_entry" in agent:
@@ -206,7 +199,7 @@ def main():
             all_errors[str(rel_path)] = errors
 
     # --- Print results ---
-    print(f"\n--- Agent Definition Validation ---")
+    print("\n--- Agent Definition Validation ---")
     print(f"Validated {total_files} agent YAML files\n")
 
     if all_errors:
@@ -215,9 +208,7 @@ def main():
             print(f"  ❌ {path}")
             for err in errors:
                 print(f"      - {err}")
-        print(
-            f"\n❌ Validation FAILED: {sum(len(e) for e in all_errors.values())} errors"
-        )
+        print(f"\n❌ Validation FAILED: {sum(len(e) for e in all_errors.values())} errors")
         sys.exit(1)
     else:
         print(f"✅ All {total_files} agent definitions are valid")

@@ -23,4 +23,4 @@ ignore = [
 ]
 
 [tool.ruff.format]
-style = "black"
+indent-style = "space"

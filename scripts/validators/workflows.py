@@ -16,7 +16,6 @@ from pathlib import Path
 
 import yaml
 
-
 REQUIRED_STEP_FIELDS = {"name", "type"}
 VALID_ACTION_TYPES = {
     "console",
@@ -47,7 +46,7 @@ def validate_workflow_yaml(yaml_path: Path) -> list[str]:
         return [f"YAML syntax error: {e}"]
 
     if workflow is None:
-        errors.append(f"Empty YAML file")
+        errors.append("Empty YAML file")
         return errors
 
     if not isinstance(workflow, dict):
@@ -102,9 +101,7 @@ def validate_workflow_yaml(yaml_path: Path) -> list[str]:
                             f"Step '{step.get('name', i)}': 'if' step missing 'condition'"
                         )
                     if "steps" not in step:
-                        errors.append(
-                            f"Step '{step.get('name', i)}': 'if' step missing 'steps'"
-                        )
+                        errors.append(f"Step '{step.get('name', i)}': 'if' step missing 'steps'")
 
     # --- Optional: triggers ---
     if "triggers" in workflow:
@@ -131,9 +128,7 @@ def validate_workflow_yaml(yaml_path: Path) -> list[str]:
         elif isinstance(inputs, list):
             for inp in inputs:
                 if not isinstance(inp, dict):
-                    errors.append(
-                        f"Input must be a dictionary, got {type(inp).__name__}"
-                    )
+                    errors.append(f"Input must be a dictionary, got {type(inp).__name__}")
                     continue
                 if "name" not in inp:
                     errors.append("Input missing 'name' field")
@@ -166,7 +161,7 @@ def main():
                 all_errors[str(rel_path)] = errors
 
     # --- Print results ---
-    print(f"\n--- Workflow Validation ---")
+    print("\n--- Workflow Validation ---")
     print(f"Validated {total_files} workflow YAML files\n")
 
     if all_errors:
@@ -175,9 +170,7 @@ def main():
             print(f"  ❌ {path}")
             for err in errors:
                 print(f"      - {err}")
-        print(
-            f"\n❌ Validation FAILED: {sum(len(e) for e in all_errors.values())} errors"
-        )
+        print(f"\n❌ Validation FAILED: {sum(len(e) for e in all_errors.values())} errors")
         sys.exit(1)
     else:
         print(f"✅ All {total_files} workflow YAMLs are valid")
