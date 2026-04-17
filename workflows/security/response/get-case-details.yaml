@@ -31,7 +31,7 @@ steps:
     type: http
     with:
       method: GET
-      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/cases/{{ inputs.case_id }}"
+      url: "__KIBANA_URL__/api/cases/{{ inputs.case_id }}"
       headers:
         Authorization: "ApiKey __KIBANA_API_KEY__"
         kbn-xsrf: "true"

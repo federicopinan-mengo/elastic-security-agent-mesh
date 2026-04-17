@@ -43,7 +43,7 @@ steps:
     type: http
     with:
       method: POST
-      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/endpoint/action/execute"
+      url: "__KIBANA_URL__/api/endpoint/action/execute"
       headers:
         Content-Type: application/json
         Authorization: "ApiKey __KIBANA_API_KEY__"

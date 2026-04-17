@@ -35,7 +35,6 @@ consts:
   es_url: "__ES_URL__"
   es_api_key: "__ES_API_KEY__"
   kibana_url: "__KIBANA_URL__"
-  kibana_space: "__KIBANA_SPACE__"
   kibana_api_key: "__KIBANA_API_KEY__"
 
 steps:
@@ -156,7 +155,7 @@ steps:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.kibana_url }}/s/{{ consts.kibana_space }}/api/cases/{{ foreach.item._source.case_id }}/comments"
+                  url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments"
                   headers:
                     Content-Type: application/json
                     Authorization: "ApiKey {{ consts.kibana_api_key }}"

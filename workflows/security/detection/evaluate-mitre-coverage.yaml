@@ -36,7 +36,7 @@ steps:
     type: http
     with:
       method: GET
-      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/detection_engine/rules/_find?per_page=1000&sort_field=name&sort_order=asc"
+      url: "__KIBANA_URL__/api/detection_engine/rules/_find?per_page=1000&sort_field=name&sort_order=asc"
       headers:
         Authorization: "ApiKey __KIBANA_API_KEY__"
         kbn-xsrf: "true"

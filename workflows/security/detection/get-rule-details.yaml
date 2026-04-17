@@ -31,7 +31,7 @@ steps:
     type: http
     with:
       method: GET
-      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/detection_engine/rules?rule_id={{ inputs.rule_id }}"
+      url: "__KIBANA_URL__/api/detection_engine/rules?rule_id={{ inputs.rule_id }}"
       headers:
         Authorization: "ApiKey __KIBANA_API_KEY__"
         kbn-xsrf: "true"
@@ -43,7 +43,7 @@ steps:
     condition: "{{ steps.try_by_rule_id.error != null }}"
     with:
       method: GET
-      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/detection_engine/rules?id={{ inputs.rule_id }}"
+      url: "__KIBANA_URL__/api/detection_engine/rules?id={{ inputs.rule_id }}"
       headers:
         Authorization: "ApiKey __KIBANA_API_KEY__"
         kbn-xsrf: "true"

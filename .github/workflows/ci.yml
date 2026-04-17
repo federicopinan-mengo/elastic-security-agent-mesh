@@ -1,0 +1,77 @@
+name: CI - Validate & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate-yaml:
+    name: Validate YAML Files
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml jsonschema click
+
+      - name: Validate Workflow YAMLs
+        run: python -m scripts.validators.workflows
+
+      - name: Validate Agent Definitions
+        run: python -m scripts.validators.agents
+
+      - name: Check for orphaned placeholders
+        run: python -m scripts.validators.placeholders
+
+      - name: Validate Agent Registry references
+        run: python -m scripts.validators.references
+
+  test-setup:
+    name: Test setup.py
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pytest requests pyyaml
+
+      - name: Run unit tests
+        run: pytest tests/test_setup.py -v
+
+  lint:
+    name: Lint Python
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install ruff
+
+      - name: Run Ruff linter
+        run: ruff check scripts/setup.py scripts/seed_*.py
+
+      - name: Run Ruff formatter check
+        run: ruff format --check scripts/setup.py scripts/seed_*.py

@@ -46,7 +46,7 @@ steps:
     type: http
     with:
       method: GET
-      url: "__KIBANA_URL____KIBANA_SPACE_PATH__/api/detection_engine/rules/_find?page={{ inputs.page }}&per_page={{ inputs.per_page }}&sort_field={{ inputs.sort_field }}&sort_order={{ inputs.sort_order }}{% if inputs.search %}&filter=alert.attributes.name:%20{{ inputs.search }}{% endif %}"
+      url: "__KIBANA_URL__/api/detection_engine/rules/_find?page={{ inputs.page }}&per_page={{ inputs.per_page }}&sort_field={{ inputs.sort_field }}&sort_order={{ inputs.sort_order }}{% if inputs.search %}&filter=alert.attributes.name:%20{{ inputs.search }}{% endif %}"
       headers:
         Authorization: "ApiKey __KIBANA_API_KEY__"
         kbn-xsrf: "true"

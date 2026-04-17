@@ -27,11 +27,9 @@ Workflow placeholder tokens (replaced at import time with env var values):
     __ES_API_KEY__          ← ES_API_KEY
     __KIBANA_URL__          ← KIBANA_URL
     __KIBANA_API_KEY__      ← KIBANA_API_KEY
-    __KIBANA_SPACE__        ← KIBANA_SPACE (raw value for registry/policies)
-    __KIBANA_SPACE_PATH__   ← /s/{space} for custom spaces, empty for default
     __VT_API_KEY__          ← VIRUSTOTAL_API_KEY
     __ABUSEIPDB_API_KEY__   ← ABUSEIPDB_API_KEY
-    __LLM_CONNECTOR_ID__    ← LLM_CONNECTOR_ID
+    __LLM_CONNECTOR_ID__     ← LLM_CONNECTOR_ID
 """
 
 import argparse
@@ -107,8 +105,7 @@ def validate_env():
     print("Environment validated:")
     print(f"  Elasticsearch: {os.environ['ELASTIC_CLOUD_URL']}")
     print(f"  Kibana:        {os.environ['KIBANA_URL']}")
-    space = os.environ.get("KIBANA_SPACE", "default") or "default"
-    print(f"  Space:         {space}")
+    print(f"  Space:         default (hardcoded)")
     print()
 
 
@@ -129,11 +126,7 @@ def kibana_headers():
 
 
 def kibana_base_url():
-    base = os.environ["KIBANA_URL"].rstrip("/")
-    space_path = _space_path()
-    if space_path:
-        return f"{base}{space_path}"
-    return base
+    return os.environ["KIBANA_URL"].rstrip("/")
 
 
 def index_exists(index_name):
@@ -699,24 +692,6 @@ def seed_operational_knowledge():
     print()
 
 
-def _space():
-    """Get the space ID (raw, for registry/policies)."""
-    raw = os.environ.get("KIBANA_SPACE", "")
-    return raw.strip()
-
-
-def _space_path():
-    """Get the space path segment for URL construction.
-
-    Returns the /s/{space} segment for custom spaces, or empty string for default.
-    """
-    raw = os.environ.get("KIBANA_SPACE", "")
-    space = raw.strip()
-    if space and space.lower() != "default":
-        return f"/s/{space}"
-    return ""
-
-
 def build_replacements():
     """Build the token → value map for injecting secrets into workflow YAML."""
     return {
@@ -724,8 +699,6 @@ def build_replacements():
         "__ES_API_KEY__": os.environ.get("ES_API_KEY", "").strip(),
         "__KIBANA_URL__": os.environ.get("KIBANA_URL", "").strip(),
         "__KIBANA_API_KEY__": os.environ.get("KIBANA_API_KEY", "").strip(),
-        "__KIBANA_SPACE__": _space(),
-        "__KIBANA_SPACE_PATH__": _space_path(),
         "__VT_API_KEY__": os.environ.get("VIRUSTOTAL_API_KEY", "").strip(),
         "__ABUSEIPDB_API_KEY__": os.environ.get("ABUSEIPDB_API_KEY", "").strip(),
         "__LLM_CONNECTOR_ID__": os.environ.get("LLM_CONNECTOR_ID", "").strip(),
