@@ -1,9 +1,0 @@
-[project]
-name = "elastic-observability-search"
-version = "0.1.0"
-description = "Observability metrics and APM search for OpenWebUI"
-requires-python = ">=3.11"
-dependencies = []
-
-[project.optional-dependencies]
-dev = ["pytest>=8.0.0"]
