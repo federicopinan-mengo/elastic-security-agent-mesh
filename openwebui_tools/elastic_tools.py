@@ -33,17 +33,18 @@ class ElasticClient:
 
     def execute(self, query: str, index_pattern: Optional[str] = None, limit: int = 100) -> dict:
         """Execute an ES|QL query and return structured results."""
-        if "LIMIT" not in query.upper():
-            query = f"{query} | LIMIT {limit}"
+        # Remove existing LIMIT if present, add our own
+        import re
+        query_clean = re.sub(r'\s*\|\s*LIMIT\s+\d+', '', query, flags=re.IGNORECASE)
+        if "LIMIT" not in query_clean.upper():
+            query_clean = f"{query_clean} | LIMIT {limit}"
 
         url = f"{self.cloud_url}/_query?format=json"
         headers = {
             "Authorization": f"ApiKey {self.api_key}",
             "Content-Type": "application/json",
         }
-        payload = {"query": query}
-        if index_pattern:
-            payload["index"] = index_pattern
+        payload = {"query": query_clean}
 
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=30)
@@ -62,16 +63,31 @@ class ElasticClient:
 
             return {
                 "success": True,
-                "query": query,
+                "query": query_clean,
                 "columns": column_names,
                 "rows": [dict(zip(column_names, row)) for row in rows],
                 "total": total,
                 "took_ms": took_ms,
             }
+        except requests.HTTPError as e:
+            # Try to parse error details from response
+            error_detail = ""
+            try:
+                error_data = e.response.json()
+                error_detail = error_data.get("error", {}).get("reason", str(error_data))
+            except Exception:
+                error_detail = str(e)
+            return {
+                "success": False,
+                "query": query_clean,
+                "error": type(e).__name__,
+                "message": error_detail,
+                "status_code": e.response.status_code if hasattr(e, 'response') else None,
+            }
         except requests.RequestException as e:
             return {
                 "success": False,
-                "query": query,
+                "query": query_clean,
                 "error": type(e).__name__,
                 "message": str(e),
             }
