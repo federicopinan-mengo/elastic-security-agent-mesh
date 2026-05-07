@@ -10,7 +10,6 @@ description: Query Elastic Security data (Fleet agents, alerts, logs, observabil
 """
 
 import json
-import os
 import requests
 from typing import Optional, Callable, Any
 
@@ -26,11 +25,11 @@ from pydantic import BaseModel, Field
 class ElasticClient:
     """Executes ES|QL queries against Elastic Cloud."""
 
-    def __init__(self):
-        self.cloud_url = os.environ.get("ELASTIC_CLOUD_URL")
-        self.api_key = os.environ.get("ES_API_KEY")
+    def __init__(self, cloud_url: str, api_key: str):
+        self.cloud_url = cloud_url
+        self.api_key = api_key
         if not self.cloud_url or not self.api_key:
-            raise ValueError("ELASTIC_CLOUD_URL and ES_API_KEY must be set")
+            raise ValueError("ELASTIC_CLOUD_URL and ES_API_KEY must be set via Valves")
 
     def execute(self, query: str, index_pattern: Optional[str] = None, limit: int = 100) -> dict:
         """Execute an ES|QL query and return structured results."""
@@ -215,10 +214,24 @@ class Tools:
     """Elastic Security Data Tools for OpenWebUI."""
 
     class Valves(BaseModel):
-        pass
+        ELASTIC_CLOUD_URL: str = Field(
+            default="",
+            description="Elastic Cloud URL (e.g. https://your-deployment.es.region.cloud.es.io)"
+        )
+        ES_API_KEY: str = Field(
+            default="",
+            description="Elastic API key with read permissions"
+        )
 
     def __init__(self):
         self.valves = self.Valves()
+
+    def _get_client(self) -> ElasticClient:
+        """Create ElasticClient from valves configuration."""
+        return ElasticClient(
+            cloud_url=self.valves.ELASTIC_CLOUD_URL,
+            api_key=self.valves.ES_API_KEY,
+        )
 
     async def elastic_fleet_search(
         self,
@@ -250,7 +263,7 @@ class Tools:
                 "data": {"description": f"Searching Fleet agents: {question[:50]}...", "done": False},
             })
 
-            client = ElasticClient()
+            client = self._get_client()
             query = _fleet_nl_to_esql(question)
             result = client.execute(query)
 
@@ -294,7 +307,7 @@ class Tools:
                 "data": {"description": f"Searching security alerts: {question[:50]}...", "done": False},
             })
 
-            client = ElasticClient()
+            client = self._get_client()
             query = _alerts_nl_to_esql(question)
             result = client.execute(query)
 
@@ -338,7 +351,7 @@ class Tools:
                 "data": {"description": f"Searching logs: {question[:50]}...", "done": False},
             })
 
-            client = ElasticClient()
+            client = self._get_client()
             query = _logs_nl_to_esql(question)
             result = client.execute(query)
 
@@ -382,7 +395,7 @@ class Tools:
                 "data": {"description": f"Searching observability data: {question[:50]}...", "done": False},
             })
 
-            client = ElasticClient()
+            client = self._get_client()
             query = _observability_nl_to_esql(question)
             result = client.execute(query)
 
