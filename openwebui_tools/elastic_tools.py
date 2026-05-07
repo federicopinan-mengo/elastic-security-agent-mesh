@@ -5,13 +5,14 @@ version: 0.1.0
 license: MIT
 required_open_webui_version: 0.7.0
 description: Query Elastic Security data (Fleet agents, alerts, logs, observability) via natural language.
-              Uses ES|QL to search .alerts-*, fleet-agents-*, logs-*, metrics-*, traces-*, apm-* indices.
+              Includes automatic index discovery to detect the correct index names for your deployment.
               Each tool accepts a natural language question and returns structured JSON results.
 """
 
 import json
+import re
 import requests
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Dict, List
 
 from fastapi import Request
 from pydantic import BaseModel, Field
@@ -23,7 +24,7 @@ from pydantic import BaseModel, Field
 
 
 class ElasticClient:
-    """Executes ES|QL queries against Elastic Cloud."""
+    """Executes ES|QL queries and discovers indices in Elastic Cloud."""
 
     def __init__(self, cloud_url: str, api_key: str):
         self.cloud_url = cloud_url
@@ -31,23 +32,69 @@ class ElasticClient:
         if not self.cloud_url or not self.api_key:
             raise ValueError("ELASTIC_CLOUD_URL and ES_API_KEY must be set via Valves")
 
-    def execute(self, query: str, index_pattern: Optional[str] = None, limit: int = 100) -> dict:
+        self._headers = {
+            "Authorization": f"ApiKey {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+    def list_indices(self, pattern: str = "*") -> List[str]:
+        """List all indices matching a pattern."""
+        url = f"{self.cloud_url}/_cat/indices/{pattern}?format=json"
+        try:
+            response = requests.get(url, headers=self._headers, timeout=30)
+            response.raise_for_status()
+            data = response.json()
+            return [idx.get("index", idx.get("uuid", "")) for idx in data if idx.get("index")]
+        except Exception:
+            return []
+
+    def discover_indices(self) -> Dict[str, List[str]]:
+        """Discover all relevant indices grouped by category."""
+        categories = {
+            "fleet": [],
+            "alerts": [],
+            "logs": [],
+            "observability": [],
+        }
+
+        # Fleet patterns
+        fleet_patterns = ["fleet-agents*", "metrics-fleet*", "fleet*"]
+        for pattern in fleet_patterns:
+            categories["fleet"].extend(self.list_indices(pattern))
+
+        # Alert patterns
+        alert_patterns = [".alerts*", "*signals*", "*alerts*", "security*"]
+        for pattern in alert_patterns:
+            categories["alerts"].extend(self.list_indices(pattern))
+
+        # Log patterns
+        log_patterns = ["logs-*", "*-logs-*", "logstash*"]
+        for pattern in log_patterns:
+            categories["logs"].extend(self.list_indices(pattern))
+
+        # Observability patterns
+        obs_patterns = ["metrics-*", "traces-*", "apm-*", "logs-apm*", "observability*"]
+        for pattern in obs_patterns:
+            categories["observability"].extend(self.list_indices(pattern))
+
+        # Deduplicate
+        for key in categories:
+            categories[key] = sorted(set(categories[key]))
+
+        return categories
+
+    def execute(self, query: str, limit: int = 100) -> dict:
         """Execute an ES|QL query and return structured results."""
         # Remove existing LIMIT if present, add our own
-        import re
         query_clean = re.sub(r'\s*\|\s*LIMIT\s+\d+', '', query, flags=re.IGNORECASE)
         if "LIMIT" not in query_clean.upper():
             query_clean = f"{query_clean} | LIMIT {limit}"
 
         url = f"{self.cloud_url}/_query?format=json"
-        headers = {
-            "Authorization": f"ApiKey {self.api_key}",
-            "Content-Type": "application/json",
-        }
         payload = {"query": query_clean}
 
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=30)
+            response = requests.post(url, headers=self._headers, json=payload, timeout=30)
             response.raise_for_status()
             data = response.json()
 
@@ -70,7 +117,6 @@ class ElasticClient:
                 "took_ms": took_ms,
             }
         except requests.HTTPError as e:
-            # Try to parse error details from response
             error_detail = ""
             try:
                 error_data = e.response.json()
@@ -94,7 +140,7 @@ class ElasticClient:
 
 
 # ============================================================================
-# NL → ES|QL Converters
+# Index Discovery & NL → ES|QL
 # ============================================================================
 
 
@@ -111,7 +157,12 @@ def _time_filter(q: str) -> str:
     return ""
 
 
-def _fleet_nl_to_esql(question: str) -> str:
+def _build_where_clause(parts: List[str]) -> str:
+    """Build WHERE clause from list of conditions."""
+    return f" | WHERE {' AND '.join(parts)}" if parts else ""
+
+
+def _fleet_nl_to_esql(question: str, indices: List[str]) -> str:
     """Convert natural language to ES|QL for Fleet agents."""
     q = question.lower()
 
@@ -123,17 +174,18 @@ def _fleet_nl_to_esql(question: str) -> str:
         status_filter = "agent.status == 'offline'"
 
     parts = [p for p in [time_part, status_filter] if p]
-    where_clause = f" | WHERE {' AND '.join(parts)}" if parts else ""
+    where_clause = _build_where_clause(parts)
 
+    index_str = ",".join(indices) if indices else "fleet-agents-*,metrics-fleet*"
     return (
-        f"FROM fleet-agents-*,metrics-fleet.agent-default-* "
+        f"FROM {index_str} "
         f"| SELECT agent.id, agent.name, agent.status, host.name, host.os.name, @timestamp"
         f"{where_clause}"
         f" | LIMIT 50"
     )
 
 
-def _alerts_nl_to_esql(question: str) -> str:
+def _alerts_nl_to_esql(question: str, indices: List[str]) -> str:
     """Convert natural language to ES|QL for security alerts."""
     q = question.lower()
 
@@ -161,17 +213,18 @@ def _alerts_nl_to_esql(question: str) -> str:
         status_filter = "alert.status == 'closed'"
 
     parts = [p for p in [time_part, severity_filter, status_filter] if p]
-    where_clause = f" | WHERE {' AND '.join(parts)}" if parts else ""
+    where_clause = _build_where_clause(parts)
 
+    index_str = ",".join(indices) if indices else ".alerts-*,.siem-signals-*"
     return (
-        f"FROM .alerts-security.alerts-*,.siem-signals-default-* "
+        f"FROM {index_str} "
         f"| SELECT alert.id, alert.rule.name, alert.severity, alert.status, kibana.alert.reason, @timestamp"
         f"{where_clause}"
         f" | LIMIT 50"
     )
 
 
-def _logs_nl_to_esql(question: str) -> str:
+def _logs_nl_to_esql(question: str, indices: List[str]) -> str:
     """Convert natural language to ES|QL for generic logs."""
     q = question.lower()
 
@@ -188,17 +241,18 @@ def _logs_nl_to_esql(question: str) -> str:
         keyword_filter = "MATCH(message, 'timeout')"
 
     parts = [p for p in [time_part, keyword_filter] if p]
-    where_clause = f" | WHERE {' AND '.join(parts)}" if parts else ""
+    where_clause = _build_where_clause(parts)
 
+    index_str = ",".join(indices) if indices else "logs-*,*-logs-*"
     return (
-        f"FROM logs-*,*-logs-*,logs-generic-default-* "
+        f"FROM {index_str} "
         f"| SELECT @timestamp, message, log.level, host.name"
         f"{where_clause}"
         f" | LIMIT 100"
     )
 
 
-def _observability_nl_to_esql(question: str) -> str:
+def _observability_nl_to_esql(question: str, indices: List[str]) -> str:
     """Convert natural language to ES|QL for APM/metrics/traces."""
     q = question.lower()
 
@@ -211,10 +265,11 @@ def _observability_nl_to_esql(question: str) -> str:
         apm_filter = "event.duration >= 1000"
 
     parts = [p for p in [time_part, apm_filter] if p]
-    where_clause = f" | WHERE {' AND '.join(parts)}" if parts else ""
+    where_clause = _build_where_clause(parts)
 
+    index_str = ",".join(indices) if indices else "metrics-*,traces-*,apm-*"
     return (
-        f"FROM metrics-*,traces-*,apm-*,logs-apm-* "
+        f"FROM {index_str} "
         f"| SELECT @timestamp, service.name, service.environment, event.duration, event.outcome"
         f"{where_clause}"
         f" | LIMIT 50"
@@ -249,6 +304,57 @@ class Tools:
             api_key=self.valves.ES_API_KEY,
         )
 
+    async def elastic_index_discovery(
+        self,
+        __user__: Optional[dict] = None,
+        __request__: Optional[Request] = None,
+        __model__: Optional[dict] = None,
+        __metadata__: Optional[dict] = None,
+        __id__: Optional[str] = None,
+        __event_emitter__: Optional[Callable[[dict], Any]] = None,
+        __event_call__: Optional[Callable[[dict], Any]] = None,
+        __chat_id__: Optional[str] = None,
+        __message_id__: Optional[str] = None,
+        __oauth_token__: Optional[dict] = None,
+        __messages__: Optional[list] = None,
+    ) -> str:
+        """
+        Discover available Elastic indices grouped by category (fleet, alerts, logs, observability).
+        Use this to find out what indices are available in your Elastic deployment before running searches.
+        Returns a list of indices for each category.
+        Example: 'What indices do I have?' / 'Show me available Elastic indices'
+        """
+        if not __event_emitter__:
+            return '{"error": "Tool context not available"}'
+
+        try:
+            await __event_emitter__({
+                "type": "status",
+                "data": {"description": "Discovering Elastic indices...", "done": False},
+            })
+
+            client = self._get_client()
+            indices = client.discover_indices()
+
+            await __event_emitter__({
+                "type": "status",
+                "data": {"description": f"Found {sum(len(v) for v in indices.values())} indices", "done": True},
+            })
+
+            return json.dumps({
+                "success": True,
+                "indices": indices,
+                "summary": {
+                    "fleet_count": len(indices.get("fleet", [])),
+                    "alerts_count": len(indices.get("alerts", [])),
+                    "logs_count": len(indices.get("logs", [])),
+                    "observability_count": len(indices.get("observability", [])),
+                }
+            }, ensure_ascii=False, default=str)
+
+        except Exception as e:
+            return json.dumps({"success": False, "error": type(e).__name__, "message": str(e)})
+
     async def elastic_fleet_search(
         self,
         question: str,
@@ -280,7 +386,19 @@ class Tools:
             })
 
             client = self._get_client()
-            query = _fleet_nl_to_esql(question)
+
+            # Discover fleet indices first
+            all_indices = client.discover_indices()
+            fleet_indices = all_indices.get("fleet", [])
+
+            if not fleet_indices:
+                return json.dumps({
+                    "success": False,
+                    "error": "No fleet indices found",
+                    "message": "No fleet-agents or metrics-fleet indices found in your deployment. Try elastic_index_discovery to see available indices."
+                }, ensure_ascii=False, default=str)
+
+            query = _fleet_nl_to_esql(question, fleet_indices)
             result = client.execute(query)
 
             await __event_emitter__({
@@ -288,6 +406,7 @@ class Tools:
                 "data": {"description": f"Fleet search complete: {result.get('total', 0)} results", "done": True},
             })
 
+            result["indices_used"] = fleet_indices
             return json.dumps(result, ensure_ascii=False, default=str)
 
         except Exception as e:
@@ -324,7 +443,19 @@ class Tools:
             })
 
             client = self._get_client()
-            query = _alerts_nl_to_esql(question)
+
+            # Discover alert indices first
+            all_indices = client.discover_indices()
+            alert_indices = all_indices.get("alerts", [])
+
+            if not alert_indices:
+                return json.dumps({
+                    "success": False,
+                    "error": "No alert indices found",
+                    "message": "No alert indices (.alerts-*, *signals-*) found in your deployment. Try elastic_index_discovery to see available indices."
+                }, ensure_ascii=False, default=str)
+
+            query = _alerts_nl_to_esql(question, alert_indices)
             result = client.execute(query)
 
             await __event_emitter__({
@@ -332,6 +463,7 @@ class Tools:
                 "data": {"description": f"Alerts search complete: {result.get('total', 0)} results", "done": True},
             })
 
+            result["indices_used"] = alert_indices
             return json.dumps(result, ensure_ascii=False, default=str)
 
         except Exception as e:
@@ -368,7 +500,19 @@ class Tools:
             })
 
             client = self._get_client()
-            query = _logs_nl_to_esql(question)
+
+            # Discover log indices first
+            all_indices = client.discover_indices()
+            log_indices = all_indices.get("logs", [])
+
+            if not log_indices:
+                return json.dumps({
+                    "success": False,
+                    "error": "No log indices found",
+                    "message": "No log indices (logs-*, *-logs-*) found in your deployment. Try elastic_index_discovery to see available indices."
+                }, ensure_ascii=False, default=str)
+
+            query = _logs_nl_to_esql(question, log_indices)
             result = client.execute(query)
 
             await __event_emitter__({
@@ -376,6 +520,7 @@ class Tools:
                 "data": {"description": f"Logs search complete: {result.get('total', 0)} results", "done": True},
             })
 
+            result["indices_used"] = log_indices
             return json.dumps(result, ensure_ascii=False, default=str)
 
         except Exception as e:
@@ -412,7 +557,19 @@ class Tools:
             })
 
             client = self._get_client()
-            query = _observability_nl_to_esql(question)
+
+            # Discover observability indices first
+            all_indices = client.discover_indices()
+            obs_indices = all_indices.get("observability", [])
+
+            if not obs_indices:
+                return json.dumps({
+                    "success": False,
+                    "error": "No observability indices found",
+                    "message": "No observability indices (metrics-*, traces-*, apm-*) found in your deployment. Try elastic_index_discovery to see available indices."
+                }, ensure_ascii=False, default=str)
+
+            query = _observability_nl_to_esql(question, obs_indices)
             result = client.execute(query)
 
             await __event_emitter__({
@@ -420,6 +577,7 @@ class Tools:
                 "data": {"description": f"Observability search complete: {result.get('total', 0)} results", "done": True},
             })
 
+            result["indices_used"] = obs_indices
             return json.dumps(result, ensure_ascii=False, default=str)
 
         except Exception as e:
