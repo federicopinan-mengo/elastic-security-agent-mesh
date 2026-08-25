@@ -29,7 +29,7 @@ system_instructions: |
 
   3. **Follow the playbook.** Check the playbooks knowledge base for standard operating procedures that apply to this alert type. Use "Semantic Knowledge Search" with index_name="kb-playbooks". Follow them unless there's a specific reason to deviate.
 
-  4. **Escalate early, escalate with context.** If an alert needs deep investigation, don't attempt it yourself — escalate to the L2 Investigation Analyst via "Dispatch Specialist". This queues an async dispatch — L2 will be invoked in its own independent session within 1-2 minutes, with its own timeout and token budget. Always include the case ID, investigation ID, alert details, and your analysis in the context field so L2 can continue on the same case. Only use "Call Subagent" when a human is waiting for an immediate response (e.g., orchestrator flow).
+   4. **Escalate early, escalate with context.** If an alert needs deep investigation, use "Dispatch Specialist" to queue the L2 Investigation Analyst asynchronously. Never invoke L2 directly.
 
   ## What you can do — and MUST do when asked
 
@@ -44,7 +44,6 @@ system_instructions: |
   - **Add notes to alerts** — use "Create Alert Note" to document your triage findings
   - **Comment on cases** — use "Add Case Comment" to document your triage findings on the case after creating it. Always add a comment summarising what you found and what actions you took.
   - **Escalate (async)** — use "Dispatch Specialist" for escalation to L2 or other agents during automated triage. The target agent runs in its own session within 1-2 minutes.
-  - **Escalate (sync)** — use "Call Subagent" only when a human is waiting for an immediate response (orchestrator flow)
 
   ## When to escalate to L2
 
@@ -72,57 +71,7 @@ knowledge_bases:
   - index: kb-playbooks
     description: SOC playbooks and standard operating procedures
 
-tools:
-  - name: Semantic Knowledge Search
-    workflow: workflows/search/semantic-knowledge-search.yaml
-    description: Search past incidents and playbooks for similar patterns
-  - name: Tag Alert as True Positive
-    workflow: workflows/security/detection/add-alert-tag-tp.yaml
-    description: Tag an alert as a confirmed true positive
-  - name: Tag Alert as False Positive
-    workflow: workflows/security/detection/add-alert-tag-fp.yaml
-    description: Tag an alert as a false positive
-  - name: Close Alert
-    workflow: workflows/security/detection/mark-alert-as-closed.yaml
-    description: Close an alert
-  - name: Acknowledge Alert
-    workflow: workflows/security/detection/mark-alert-as-acknowledged.yaml
-    description: Acknowledge an alert for investigation
-  - name: Create Case
-    workflow: workflows/security/response/createcasetool.yaml
-    description: Create a Kibana security case for incident tracking
-  - name: Get Case Details
-    workflow: workflows/security/response/get-case-details.yaml
-    description: Retrieve full details of a case before creating duplicates
-  - name: Add Alert to Case
-    workflow: workflows/security/response/add-alert-to-case.yaml
-    description: Attach a security alert to an existing case for consolidated tracking
-  - name: Create Alert Note
-    workflow: workflows/security/detection/create-alert-note.yaml
-    description: Add triage notes to an alert
-  - name: Add Case Comment
-    workflow: workflows/security/response/add-case-comment.yaml
-    description: Add a comment or investigation update to an existing case
-  - name: Check Action Policy
-    workflow: workflows/governance/check-action-policy.yaml
-    description: Check governance policy before executing actions
-  - name: Log Decision
-    workflow: workflows/governance/log-decision.yaml
-    description: Record a governance decision for audit trail
-  - name: Security Alerts
-    type: builtin
-    tool_id: security.alerts
-    description: Search and analyze security alerts for triage
-  - name: Agent Registry
-    type: index_search
-    index: agent-registry
-    description: Search the agent registry to discover specialist agents by capability or domain
-  - name: Dispatch Specialist
-    workflow: workflows/mesh/write-dispatch-request.yaml
-    description: Queue an async dispatch to a specialist agent (L2, threat intel, forensics). The agent runs in its own session within 1-2 minutes.
-  - name: Call Subagent
-    workflow: workflows/ai-agents/call-subagent-workflow.yaml
-    description: Invoke a specialist agent synchronously (use only when a human is waiting for an immediate response)
+tools: [{name: Bounded Alert Context, profile: bounded-alert-context-v1}, {name: Record L1 Investigation Result}, {name: Dispatch Specialist, workflow: workflows/mesh/write-dispatch-request.yaml}]
 
 registry_entry:
   agent_name: "L1 Triage Analyst"

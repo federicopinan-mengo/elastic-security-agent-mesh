@@ -19,7 +19,6 @@ env:
   KIBANA_URL: ${{ secrets.KIBANA_URL }}
   ES_API_KEY: ${{ secrets.ES_API_KEY }}
   KIBANA_API_KEY: ${{ secrets.KIBANA_API_KEY }}
-  KIBANA_SPACE: ${{ secrets.KIBANA_SPACE }}
   INFERENCE_ENDPOINT_ID: ${{ secrets.INFERENCE_ENDPOINT_ID }}
   VIRUSTOTAL_API_KEY: ${{ secrets.VIRUSTOTAL_API_KEY }}
   ABUSEIPDB_API_KEY: ${{ secrets.ABUSEIPDB_API_KEY }}
@@ -71,7 +70,7 @@ jobs:
           echo "|---------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Action** | \`${{ inputs.action }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Target** | \`${KIBANA_URL}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Space** | \`${KIBANA_SPACE:-default}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Space** | \`default\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Inference** | \`${INFERENCE_ENDPOINT_ID:-.multilingual-e5-small-elasticsearch}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps (Phase 2)" >> $GITHUB_STEP_SUMMARY

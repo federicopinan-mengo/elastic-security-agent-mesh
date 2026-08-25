@@ -8,19 +8,26 @@ Run with: pytest tests/test_setup.py -v
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+import yaml
 
 # Add scripts/ to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 from setup import (
-    slugify,
-    build_replacements,
-    apply_replacements,
-    validate_env,
+    ALERT_CONTEXT_QUERY,
+    AlertContextConfigurationError,
     _get_deployed_workflow_names,
+    apply_replacements,
+    build_alert_context_tool,
+    build_replacements,
+    import_workflows,
+    slugify,
+    validate_alert_context_params,
+    validate_alert_context_schema,
+    validate_env,
 )
 
 
@@ -58,6 +65,58 @@ class TestSlugify:
 
 
 # =============================================================================
+# Test: bounded alert context
+# =============================================================================
+class TestBoundedAlertContext:
+    def test_immutable_profile_accepts_only_alert_id(self):
+        tool = build_alert_context_tool(
+            {"name": "Bounded Alert Context", "profile": "bounded-alert-context-v1"}
+        )
+        assert tool["configuration"]["query"] == ALERT_CONTEXT_QUERY
+        assert set(tool["configuration"]["params"]) == {"alert_id"}
+        assert "LIMIT 1" in ALERT_CONTEXT_QUERY
+        with pytest.raises(AlertContextConfigurationError):
+            build_alert_context_tool({"name": "Bounded Alert Context", "query": "FROM *"})
+
+    @pytest.mark.parametrize("alert_id", ["", "a/b", "a" * 513, "alert-01_"])
+    def test_alert_id_validation_is_bounded(self, alert_id):
+        if alert_id == "alert-01_":
+            assert validate_alert_context_params({"alert_id": alert_id}) == alert_id
+        else:
+            with pytest.raises(AlertContextConfigurationError):
+                validate_alert_context_params({"alert_id": alert_id})
+
+    def test_schema_gate_rejects_ambiguous_fields_before_tool_creation(self):
+        resolved = MagicMock(ok=True)
+        resolved.json.return_value = {"indices": [{"name": ".alerts-security.alerts-a"}]}
+        field_caps = MagicMock(ok=True)
+        field_caps.json.return_value = {
+            "fields": {
+                "@timestamp": {"date": {"searchable": True}},
+                "kibana.alert.workflow_status": {"keyword": {"searchable": True}},
+                "kibana.alert.rule.name": {"keyword": {"searchable": True}},
+                "kibana.alert.severity": {"keyword": {"searchable": True}},
+                "kibana.alert.risk_score": {
+                    "double": {"searchable": True},
+                    "long": {"searchable": True},
+                },
+            }
+        }
+        with (
+            patch.dict(
+                os.environ,
+                {"ELASTIC_CLOUD_URL": "https://test.es", "ES_API_KEY": "key"},
+                clear=True,
+            ),
+            patch("setup.requests.get", side_effect=[resolved, field_caps]),
+            patch("setup.requests.post") as post,
+        ):
+            with pytest.raises(AlertContextConfigurationError, match="ambiguous"):
+                validate_alert_context_schema()
+        post.assert_not_called()
+
+
+# =============================================================================
 # Test: build_replacements
 # =============================================================================
 class TestBuildReplacements:
@@ -68,7 +127,6 @@ class TestBuildReplacements:
             "ES_API_KEY": "test-es-key",
             "KIBANA_URL": "https://test.kb.region.gcp.cloud.es.io",
             "KIBANA_API_KEY": "test-kibana-key",
-            "KIBANA_SPACE": "my-space",
             "VIRUSTOTAL_API_KEY": "vt-key",
             "ABUSEIPDB_API_KEY": "abuse-key",
             "LLM_CONNECTOR_ID": "claude-sonnet",
@@ -153,6 +211,72 @@ steps:
         result = apply_replacements(yaml_content, replacements)
         assert "https://test.kb.es.io" in result
         assert "test-api-key" in result
+
+
+# =============================================================================
+# Test: import_workflows
+# =============================================================================
+class TestImportWorkflows:
+    def test_partial_import_failure_attempts_all_workflows_and_raises(self, tmp_path, monkeypatch):
+        workflow_dir = tmp_path / "workflows"
+        workflow_dir.mkdir()
+        (workflow_dir / "failing.yaml").write_text("name: Failing Workflow\n")
+        (workflow_dir / "success.yaml").write_text("name: Success Workflow\n")
+        monkeypatch.setattr("setup.REPO_ROOT", tmp_path)
+        monkeypatch.setattr("setup.WORKFLOW_DIRS", ("workflows",))
+
+        failed_response = MagicMock(ok=False, status_code=400, text="invalid workflow schema")
+        success_response = MagicMock(ok=True)
+        success_response.json.return_value = {
+            "created": [{"name": "Success Workflow", "id": "success-id"}],
+            "failures": [],
+            "total": 1,
+        }
+
+        with (
+            patch.dict(
+                os.environ,
+                {"KIBANA_URL": "https://test.kb", "KIBANA_API_KEY": "key"},
+                clear=True,
+            ),
+            patch("setup.requests.post", side_effect=[failed_response, success_response]) as post,
+            patch("setup.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError) as exc_info:
+                import_workflows()
+
+        assert post.call_count == 2
+        assert [call.kwargs["json"] for call in post.call_args_list] == [
+            {"workflows": [{"yaml": "name: Failing Workflow\n"}]},
+            {"workflows": [{"yaml": "name: Success Workflow\n"}]},
+        ]
+        assert "failing.yaml" in str(exc_info.value)
+        assert "HTTP 400" in str(exc_info.value)
+        assert "invalid workflow schema" in str(exc_info.value)
+
+    def test_response_failures_are_aggregated_and_fail_closed(self, tmp_path, monkeypatch):
+        workflow_dir = tmp_path / "workflows"
+        workflow_dir.mkdir()
+        (workflow_dir / "invalid.yaml").write_text("name: Invalid Workflow\n")
+        monkeypatch.setattr("setup.REPO_ROOT", tmp_path)
+        monkeypatch.setattr("setup.WORKFLOW_DIRS", ("workflows",))
+
+        response = MagicMock(ok=True)
+        response.json.return_value = {
+            "created": [],
+            "failures": [{"message": "invalid workflow schema"}],
+            "total": 1,
+        }
+
+        with (
+            patch.dict(
+                os.environ, {"KIBANA_URL": "https://test.kb", "KIBANA_API_KEY": "key"}, clear=True
+            ),
+            patch("setup.requests.post", return_value=response),
+            patch("setup.time.sleep"),
+        ):
+            with pytest.raises(RuntimeError, match="invalid workflow schema"):
+                import_workflows()
 
 
 # =============================================================================
@@ -274,6 +398,61 @@ class TestDispatchRequestsMapping:
         for field in required:
             assert field in props, f"Missing required field: {field}"
 
+    def test_idempotency_fields_are_typed_for_existing_requests(self):
+        """Dispatches retain one stable identity and monitor-owned retry state."""
+        from setup import dispatch_requests_mapping
+
+        props = dispatch_requests_mapping()["mappings"]["properties"]
+        assert props["idempotency_key"] == {"type": "keyword"}
+        assert props["retry_count"] == {"type": "integer"}
+
+    def test_idempotency_mapping_is_additive_for_existing_indices(self):
+        from setup import ensure_dispatch_requests_mapping
+
+        response = MagicMock(ok=True)
+        with (
+            patch.dict(os.environ, {"ELASTIC_CLOUD_URL": "https://test.es", "ES_API_KEY": "key"}),
+            patch("setup.requests.put", return_value=response) as put,
+        ):
+            assert ensure_dispatch_requests_mapping() is True
+        assert put.call_args.args[0].endswith("/dispatch-requests/_mapping")
+        assert put.call_args.kwargs["json"] == {
+            "properties": {
+                "idempotency_key": {"type": "keyword"},
+                "retry_count": {"type": "integer"},
+            }
+        }
+
+    def test_l1_to_l2_dispatch_is_idempotent_and_preserves_document_id(self):
+        path = Path(__file__).resolve().parent.parent / "workflows/mesh/write-dispatch-request.yaml"
+        workflow = yaml.safe_load(path.read_text())
+        steps = {step["name"]: step for step in workflow["steps"]}
+
+        assert {item["name"] for item in workflow["inputs"]} >= {"document_id", "context"}
+        key = "l1d--1--{{ inputs.document_id }}--security-mesh.l1-triage-analyst--security-mesh.l2-investigation-analyst"
+        assert steps["derive_idempotency_key"]["with"]["message"] == key
+        assert steps["find_active_dispatch"]["with"]["body"]["query"]["bool"]["filter"] == [
+            {"term": {"idempotency_key": "{{ steps.derive_idempotency_key.output }}"}},
+            {"terms": {"status": ["pending", "dispatched"]}},
+        ]
+        create = steps["create_dispatch_request"]["else"][0]["with"]
+        assert create["url"].endswith("/_create/{{ steps.derive_idempotency_key.output }}")
+        assert create["body"]["idempotency_key"] == "{{ steps.derive_idempotency_key.output }}"
+        assert create["body"]["investigation_id"] == "{{ inputs.document_id }}"
+        assert create["body"]["retry_count"] == 0
+        assert "{{ inputs.document_id }}" in create["body"]["context"]
+        assert create["body"]["target_agent"] == "security-mesh.l2-investigation-analyst"
+        assert create["body"]["requesting_agent"] == "security-mesh.l1-triage-analyst"
+        assert steps["create_dispatch_request"]["steps"] == [
+            {
+                "name": "duplicate_noop",
+                "type": "console",
+                "with": {
+                    "message": "Active L1-to-L2 dispatch {{ steps.derive_idempotency_key.output }} already exists; status and retry_count are unchanged."
+                },
+            }
+        ]
+
 
 # =============================================================================
 # Test: agent_registry_mapping
@@ -309,6 +488,67 @@ class TestInvestigationContextsMapping:
         assert "actions_taken" in props
         assert props["actions_taken"]["type"] == "nested"
         assert "pending_actions" in props
+
+    def test_l1_result_is_a_strict_versioned_envelope(self):
+        """L1 results have no untyped fields or caller-controlled routing."""
+        from setup import investigation_contexts_mapping
+
+        result = investigation_contexts_mapping()["mappings"]["properties"]["l1_result"]
+        assert result["type"] == "object"
+        assert result["dynamic"] == "strict"
+        assert set(result["properties"]) == {
+            "schema_version",
+            "investigation_id",
+            "decision",
+            "summary",
+            "evidence_refs",
+            "observed_at",
+            "recorded_at",
+            "source_agent",
+            "target_agent",
+            "escalation",
+        }
+        assert result["properties"]["decision"]["type"] == "keyword"
+        assert result["properties"]["evidence_refs"]["type"] == "keyword"
+        escalation = result["properties"]["escalation"]
+        assert escalation["type"] == "object" and escalation["dynamic"] == "strict"
+        assert set(escalation["properties"]) == {"requested", "reason", "requested_at"}
+
+    def test_l1_result_mapping_is_additive_for_existing_indices(self):
+        from setup import ensure_l1_result_mapping
+
+        response = MagicMock(ok=True)
+        with (
+            patch.dict(os.environ, {"ELASTIC_CLOUD_URL": "https://test.es", "ES_API_KEY": "key"}),
+            patch("setup.requests.put", return_value=response) as put,
+        ):
+            assert ensure_l1_result_mapping() is True
+        assert put.call_args.args[0].endswith("/investigation-contexts/_mapping")
+        assert set(put.call_args.kwargs["json"]["properties"]) == {"l1_result"}
+
+    def test_record_l1_workflow_never_dispatches(self):
+        """The record workflow is limited to the durable context write boundary."""
+        path = (
+            Path(__file__).resolve().parent.parent
+            / "workflows/investigation/record-l1-investigation-result.yaml"
+        )
+        workflow = yaml.safe_load(path.read_text())
+        assert {item["name"] for item in workflow["inputs"]} == {
+            "document_id",
+            "decision",
+            "summary",
+            "evidence_refs",
+            "observed_at",
+            "target_agent",
+            "escalation_reason",
+            "escalation_requested_at",
+        }
+        assert [step["name"] for step in workflow["steps"]] == [
+            "load_context",
+            "record_l1_result",
+            "confirm",
+        ]
+        assert "dispatch-requests" not in path.read_text()
 
 
 # =============================================================================

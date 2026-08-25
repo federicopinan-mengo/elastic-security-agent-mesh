@@ -31,25 +31,17 @@ triggers:
   - type: manual
 
 inputs:
-  - name: target_agent
+  - name: document_id
     type: string
-    description: "Agent ID of the specialist to invoke"
+    description: "Original investigation-contexts document ID for the L2 envelope retrieval"
     required: true
   - name: context
     type: string
-    description: "Full instructions and context for the target agent (include case ID, investigation ID, alert details, and what you want the agent to do)"
+    description: "L1 escalation summary for the L2 Investigation Analyst"
     required: true
   - name: case_id
     type: string
     description: "Case ID for tracking (the target agent will also receive this in the context)"
-    required: false
-  - name: investigation_id
-    type: string
-    description: "Investigation document ID for tracking"
-    required: false
-  - name: requesting_agent
-    type: string
-    description: "Your agent ID (for audit trail)"
     required: false
   - name: priority
     type: string
@@ -62,32 +54,59 @@ consts:
 
 steps:
 
-  - name: generate_dispatch_id
+  - name: derive_idempotency_key
     type: console
     with:
-      message: "dsp-{{ 'now' | date: '%s%N' }}"
+      message: "l1d--1--{{ inputs.document_id }}--security-mesh.l1-triage-analyst--security-mesh.l2-investigation-analyst"
 
-  - name: write_request
+  # A query avoids an unnecessary create in the normal duplicate path. The
+  # deterministic _create in the else branch is still required to close races.
+  - name: find_active_dispatch
     type: http
     with:
       method: POST
-      url: "{{ consts.es_url }}/dispatch-requests/_doc"
+      url: "{{ consts.es_url }}/dispatch-requests/_search"
       headers:
         Content-Type: application/json
         Authorization: "ApiKey {{ consts.es_api_key }}"
       body:
-        dispatch_id: "{{ steps.generate_dispatch_id.output }}"
-        requesting_agent: "{{ inputs.requesting_agent | default: 'unknown' }}"
-        target_agent: "{{ inputs.target_agent }}"
-        case_id: "{{ inputs.case_id | default: '' }}"
-        investigation_id: "{{ inputs.investigation_id | default: '' }}"
-        priority: "{{ inputs.priority }}"
-        context: "{{ inputs.context }}"
-        status: "pending"
-        retry_count: 0
-        created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+        size: 1
+        query:
+          bool:
+            filter:
+              - term:
+                  idempotency_key: "{{ steps.derive_idempotency_key.output }}"
+              - terms:
+                  status: ["pending", "dispatched"]
 
-  - name: confirm
-    type: console
-    with:
-      message: "Dispatch {{ steps.generate_dispatch_id.output }} queued for {{ inputs.target_agent }}. The dispatch monitor will invoke the agent within 1-2 minutes."
+  - name: create_dispatch_request
+    type: if
+    condition: steps.find_active_dispatch.output.data.hits.total.value > 0
+    steps:
+      - name: duplicate_noop
+        type: console
+        with:
+          message: "Active L1-to-L2 dispatch {{ steps.derive_idempotency_key.output }} already exists; status and retry_count are unchanged."
+    else:
+      - name: create_request
+        type: http
+        on-failure:
+          continue: true
+        with:
+          method: PUT
+          url: "{{ consts.es_url }}/dispatch-requests/_create/{{ steps.derive_idempotency_key.output }}"
+          headers:
+            Content-Type: application/json
+            Authorization: "ApiKey {{ consts.es_api_key }}"
+          body:
+            dispatch_id: "{{ steps.derive_idempotency_key.output }}"
+            idempotency_key: "{{ steps.derive_idempotency_key.output }}"
+            requesting_agent: "security-mesh.l1-triage-analyst"
+            target_agent: "security-mesh.l2-investigation-analyst"
+            case_id: "{{ inputs.case_id | default: '' }}"
+            investigation_id: "{{ inputs.document_id }}"
+            priority: "{{ inputs.priority }}"
+            context: "L2 envelope document ID: {{ inputs.document_id }}\n{{ inputs.context }}"
+            status: "pending"
+            retry_count: 0
+            created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"

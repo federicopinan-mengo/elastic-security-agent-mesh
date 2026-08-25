@@ -41,9 +41,6 @@ def kibana_base_url():
     if not base:
         print("ERROR: KIBANA_URL environment variable not set.")
         sys.exit(1)
-    space = os.environ.get("KIBANA_SPACE", "").strip()
-    if space and space != "default":
-        return f"{base}/s/{space}"
     return base
 
 

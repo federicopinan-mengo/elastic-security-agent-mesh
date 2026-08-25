@@ -1,0 +1,69 @@
+name: Record L1 Investigation Result
+description: Persist a validated L1 result without dispatching another agent.
+enabled: true
+tags: [agent-mesh, investigation]
+triggers:
+  - type: manual
+inputs:
+  - {name: document_id, type: string, required: true}
+  - {name: decision, type: string, required: true}
+  - {name: summary, type: string, required: true}
+  - {name: evidence_refs, type: array, required: false}
+  - {name: observed_at, type: string, required: true}
+  - {name: target_agent, type: string, required: false}
+  - {name: escalation_reason, type: string, required: false}
+  - {name: escalation_requested_at, type: string, required: false}
+consts:
+  es_url: "__ES_URL__"
+  es_api_key: "__ES_API_KEY__"
+  index_name: investigation-contexts
+  source_agent: security-mesh.l1-triage-analyst
+  target_agent: security-mesh.l2-investigation-analyst
+steps:
+  - name: load_context
+    type: http
+    with:
+      method: GET
+      url: "{{ consts.es_url }}/{{ consts.index_name }}/_doc/{{ inputs.document_id }}"
+      headers:
+        Authorization: "ApiKey {{ consts.es_api_key }}"
+  - name: record_l1_result
+    type: http
+    with:
+      method: POST
+      url: "{{ consts.es_url }}/{{ consts.index_name }}/_update/{{ inputs.document_id }}"
+      headers:
+        Content-Type: application/json
+        Authorization: "ApiKey {{ consts.es_api_key }}"
+      body:
+        script:
+          source: |
+            if (ctx._source.investigation_id == null || ctx._source.investigation_id != params.investigation_id) { throw new IllegalArgumentException('missing or uncorrelated investigation'); }
+            if (!['benign', 'suspicious', 'escalate'].contains(params.decision)) { throw new IllegalArgumentException('invalid decision'); }
+            if (params.summary == null || params.summary.length() < 1 || params.summary.length() > 1024) { throw new IllegalArgumentException('invalid summary'); }
+            if (!(params.evidence_refs instanceof List) || params.evidence_refs.size() > 10) { throw new IllegalArgumentException('invalid evidence references'); }
+            for (def ref : params.evidence_refs) { if (ref == null || ref.length() < 1 || ref.length() > 256) { throw new IllegalArgumentException('invalid evidence reference'); } }
+            if (params.observed_at == null || !params.observed_at.matches('^\\d{4}-\\d{2}-\\d{2}T.*Z$')) { throw new IllegalArgumentException('observed_at must be UTC'); }
+            def escalation = ['requested': false];
+            if (params.decision == 'escalate') {
+              if (params.target_agent != params.stored_target_agent || params.escalation_reason == null || params.escalation_reason.length() < 1 || params.escalation_reason.length() > 512 || params.escalation_requested_at == null || !params.escalation_requested_at.matches('^\\d{4}-\\d{2}-\\d{2}T.*Z$')) { throw new IllegalArgumentException('invalid escalation'); }
+              escalation = ['requested': true, 'reason': params.escalation_reason, 'requested_at': params.escalation_requested_at];
+            } else if (params.target_agent != '' || params.escalation_reason != '' || params.escalation_requested_at != '') { throw new IllegalArgumentException('non-escalation metadata is forbidden'); }
+            ctx._source.l1_result = ['schema_version': '1', 'investigation_id': params.investigation_id, 'decision': params.decision, 'summary': params.summary, 'evidence_refs': params.evidence_refs, 'observed_at': params.observed_at, 'recorded_at': params.recorded_at, 'source_agent': params.source_agent, 'target_agent': params.stored_target_agent, 'escalation': escalation];
+            ctx._source.updated_at = params.recorded_at;
+          params:
+            investigation_id: "{{ steps.load_context.output.data._source.investigation_id }}"
+            decision: "{{ inputs.decision }}"
+            summary: "{{ inputs.summary }}"
+            evidence_refs: "{{ inputs.evidence_refs | default: '[]' }}"
+            observed_at: "{{ inputs.observed_at }}"
+            target_agent: "{{ inputs.target_agent | default: '' }}"
+            escalation_reason: "{{ inputs.escalation_reason | default: '' }}"
+            escalation_requested_at: "{{ inputs.escalation_requested_at | default: '' }}"
+            recorded_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
+            source_agent: "{{ consts.source_agent }}"
+            stored_target_agent: "{{ consts.target_agent }}"
+  - name: confirm
+    type: console
+    with:
+      message: "L1 result recorded for {{ inputs.document_id }} without dispatch."

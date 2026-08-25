@@ -57,6 +57,102 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 REQUIRED_ENV_VARS = ["ELASTIC_CLOUD_URL", "KIBANA_URL", "ES_API_KEY", "KIBANA_API_KEY"]
 
+ALERT_CONTEXT_PROFILE = "bounded-alert-context-v1"
+ALERT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,512}$")
+ALERT_CONTEXT_FIELDS = (
+    "_id",
+    "@timestamp",
+    "kibana.alert.workflow_status",
+    "kibana.alert.rule.name",
+    "kibana.alert.severity",
+    "kibana.alert.risk_score",
+    "kibana.alert.reason",
+    "agent.id",
+    "host.name",
+    "user.name",
+)
+ALERT_CONTEXT_QUERY = "\n".join(
+    (
+        "FROM .alerts-security.alerts-* METADATA _id",
+        '| WHERE _id == ?alert_id AND ?alert_id RLIKE "^[A-Za-z0-9_-]{1,512}$"',
+        "| WHERE @timestamp >= NOW() - 7 days AND @timestamp <= NOW()",
+        f"| KEEP {', '.join(ALERT_CONTEXT_FIELDS)}",
+        "| LIMIT 1",
+    )
+)
+
+
+AlertContextConfigurationError = ValueError
+
+
+def validate_alert_context_params(params):
+    alert_id = (
+        params.get("alert_id") if isinstance(params, dict) and set(params) == {"alert_id"} else None
+    )
+    if not isinstance(alert_id, str) or not ALERT_ID_PATTERN.fullmatch(alert_id):
+        raise AlertContextConfigurationError("alert_id must match ^[A-Za-z0-9_-]{1,512}$")
+    return alert_id
+
+
+def build_alert_context_tool(tool_definition):
+    """Build the sole immutable Agent Builder ES|QL tool payload."""
+    if tool_definition != {"name": "Bounded Alert Context", "profile": ALERT_CONTEXT_PROFILE}:
+        raise AlertContextConfigurationError("bounded alert context profile must not be overridden")
+    return {
+        "id": slugify(tool_definition["name"]),
+        "type": "esql",
+        "description": "Read one alert by alert_id matching ^[A-Za-z0-9_-]{1,512}$.",
+        "tags": ["security-mesh"],
+        "configuration": {
+            "query": ALERT_CONTEXT_QUERY,
+            "params": {"alert_id": {"type": "string", "description": "Bounded alert ID."}},
+        },
+    }
+
+
+def validate_alert_context_schema():
+    """Fail closed unless the complete fixed ES|QL profile is schema-compatible."""
+    es_url, headers = os.environ["ELASTIC_CLOUD_URL"].rstrip("/"), es_headers()
+    resolved = requests.get(
+        f"{es_url}/_resolve/index/.alerts-security.alerts-*",
+        headers=headers,
+        params={"expand_wildcards": "all"},
+        timeout=30,
+    )
+    if not resolved.ok or not any(
+        resolved.json().get(key) for key in ("indices", "aliases", "data_streams")
+    ):
+        raise AlertContextConfigurationError("alert-context index scope is absent or unresolved")
+    field_caps = requests.get(
+        f"{es_url}/.alerts-security.alerts-*/_field_caps",
+        headers=headers,
+        params={"fields": ",".join(ALERT_CONTEXT_FIELDS[1:]), "include_unmapped": "true"},
+        timeout=30,
+    )
+    fields = field_caps.json().get("fields", {}) if field_caps.ok else {}
+    for field in ALERT_CONTEXT_FIELDS[1:]:
+        capabilities = fields.get(field)
+        if not isinstance(capabilities, dict) or len(capabilities) != 1:
+            raise AlertContextConfigurationError(
+                f"alert-context field is missing or ambiguous: {field}"
+            )
+        capability = next(iter(capabilities.values()))
+        if (
+            not isinstance(capability, dict)
+            or not capability.get("searchable")
+            or capability.get("non_searchable_indices")
+        ):
+            raise AlertContextConfigurationError(f"alert-context field is incompatible: {field}")
+    compiled = requests.post(
+        f"{es_url}/_query",
+        headers=headers,
+        json={"query": ALERT_CONTEXT_QUERY, "params": [{"alert_id": "schema-gate"}]},
+        timeout=30,
+    )
+    if not compiled.ok:
+        raise AlertContextConfigurationError("immutable alert-context ES|QL query did not compile")
+
+
 # kb-compliance excluded — uses compliance_mapping() (nested controls) instead of generic KB mapping
 KNOWLEDGE_BASE_INDICES = [
     "kb-detection-rules",
@@ -251,6 +347,30 @@ def investigation_contexts_mapping():
                         "evidence_refs": {"type": "keyword"},
                     },
                 },
+                "l1_result": {
+                    "type": "object",
+                    "dynamic": "strict",
+                    "properties": {
+                        "schema_version": {"type": "keyword"},
+                        "investigation_id": {"type": "keyword"},
+                        "decision": {"type": "keyword"},
+                        "summary": {"type": "text"},
+                        "evidence_refs": {"type": "keyword"},
+                        "observed_at": {"type": "date"},
+                        "recorded_at": {"type": "date"},
+                        "source_agent": {"type": "keyword"},
+                        "target_agent": {"type": "keyword"},
+                        "escalation": {
+                            "type": "object",
+                            "dynamic": "strict",
+                            "properties": {
+                                "requested": {"type": "boolean"},
+                                "reason": {"type": "text"},
+                                "requested_at": {"type": "date"},
+                            },
+                        },
+                    },
+                },
                 "created_at": {"type": "date"},
                 "updated_at": {"type": "date"},
                 "resolved_at": {"type": "date"},
@@ -258,6 +378,18 @@ def investigation_contexts_mapping():
             }
         },
     }
+
+
+def ensure_l1_result_mapping():
+    """Apply the additive L1 result mapping to existing investigation indices."""
+    result = investigation_contexts_mapping()["mappings"]["properties"]["l1_result"]
+    response = requests.put(
+        f"{os.environ['ELASTIC_CLOUD_URL'].rstrip('/')}/investigation-contexts/_mapping",
+        headers=es_headers(),
+        json={"properties": {"l1_result": result}},
+        timeout=30,
+    )
+    return response.ok
 
 
 def action_policies_mapping():
@@ -299,6 +431,8 @@ def dispatch_requests_mapping():
                 "context": {"type": "text"},
                 "priority": {"type": "keyword"},
                 "status": {"type": "keyword"},
+                "idempotency_key": {"type": "keyword"},
+                "retry_count": {"type": "integer"},
                 "created_at": {"type": "date"},
                 "dispatched_at": {"type": "date"},
                 "completed_at": {"type": "date"},
@@ -306,6 +440,23 @@ def dispatch_requests_mapping():
             }
         },
     }
+
+
+def ensure_dispatch_requests_mapping():
+    """Apply additive idempotency fields to existing dispatch indices."""
+    properties = dispatch_requests_mapping()["mappings"]["properties"]
+    response = requests.put(
+        f"{os.environ['ELASTIC_CLOUD_URL'].rstrip('/')}/dispatch-requests/_mapping",
+        headers=es_headers(),
+        json={
+            "properties": {
+                "idempotency_key": properties["idempotency_key"],
+                "retry_count": properties["retry_count"],
+            }
+        },
+        timeout=30,
+    )
+    return response.ok
 
 
 def approval_requests_mapping():
@@ -421,13 +572,15 @@ def create_all_indices():
     create_index("agent-registry", agent_registry_mapping())
 
     print("\nInvestigation contexts:")
-    create_index("investigation-contexts", investigation_contexts_mapping())
+    if create_index("investigation-contexts", investigation_contexts_mapping()):
+        ensure_l1_result_mapping()
 
     print("\nAction policies:")
     create_index("action-policies", action_policies_mapping())
 
     print("\nDispatch requests:")
-    create_index("dispatch-requests", dispatch_requests_mapping())
+    if create_index("dispatch-requests", dispatch_requests_mapping()):
+        ensure_dispatch_requests_mapping()
 
     print("\nApproval requests:")
     create_index("approval-requests", approval_requests_mapping())
@@ -889,7 +1042,7 @@ def import_workflows():
     For each file the script:
       1. Replaces placeholder tokens (__ES_URL__, __VT_API_KEY__, etc.)
          with real values from environment variables.
-      2. POSTs the YAML to create the workflow.
+      2. POSTs the YAML in the Workflows bulk-create request envelope.
       3. If the workflow already exists (409) it PUTs to update it instead,
          so re-running the script always converges to the repo state.
 
@@ -912,6 +1065,7 @@ def import_workflows():
     success = 0
     updated = 0
     failed = 0
+    failures = []
 
     for workflow_dir in WORKFLOW_DIRS:
         dir_path = REPO_ROOT / workflow_dir
@@ -932,23 +1086,33 @@ def import_workflows():
             resp = requests.post(
                 f"{base_url}/api/workflows",
                 headers=headers,
-                json={"yaml": yaml_content},
+                json={"workflows": [{"yaml": yaml_content}]},
                 timeout=30,
             )
 
             if resp.ok:
                 data = resp.json()
-                name = data.get("name", yaml_file.stem)
-                wf_id = data.get("id", "")
-                if wf_id:
-                    name_to_id[name] = wf_id
-                print(f"    [imported] {name}")
-                success += 1
+                created = data.get("created", [])
+                response_failures = data.get("failures", [])
+                for workflow in created:
+                    name = workflow.get("name", yaml_file.stem)
+                    wf_id = workflow.get("id", "")
+                    if wf_id:
+                        name_to_id[name] = wf_id
+                    print(f"    [imported] {name}")
+                    success += 1
+                for failure in response_failures:
+                    detail = " ".join(str(failure).split())[:300]
+                    print(f"    [FAILED] {yaml_file.name}: {detail or 'no response detail'}")
+                    failures.append(
+                        f"{yaml_file} ({yaml_file.name}): {detail or 'no response detail'}"
+                    )
+                    failed += 1
             elif resp.status_code == 409:
                 wf_id = resp.json().get("id", "")
                 if wf_id:
                     put_resp = requests.put(
-                        f"{base_url}/api/workflows/{wf_id}",
+                        f"{base_url}/api/workflows/workflow/{wf_id}",
                         headers=headers,
                         json={"yaml": yaml_content},
                         timeout=30,
@@ -959,19 +1123,37 @@ def import_workflows():
                         print(f"    [updated] {name}")
                         updated += 1
                     else:
-                        print(f"    [FAILED update] {yaml_file.name}: {put_resp.status_code}")
+                        detail = " ".join(str(getattr(put_resp, "text", "")).split())[:300]
+                        print(
+                            f"    [FAILED update] {yaml_file.name}: "
+                            f"{put_resp.status_code} - {detail or 'no response detail'}"
+                        )
+                        failures.append(
+                            f"{yaml_file} ({yaml_file.name}): HTTP {put_resp.status_code} - "
+                            f"{detail or 'no response detail'}"
+                        )
                         failed += 1
                 else:
                     print(f"    [skip] {yaml_file.name} (exists, no id returned)")
                     updated += 1
             else:
-                print(f"    [FAILED] {yaml_file.name}: {resp.status_code}")
+                detail = " ".join(str(getattr(resp, "text", "")).split())[:300]
+                print(
+                    f"    [FAILED] {yaml_file.name}: {resp.status_code} - "
+                    f"{detail or 'no response detail'}"
+                )
+                failures.append(
+                    f"{yaml_file} ({yaml_file.name}): HTTP {resp.status_code} - "
+                    f"{detail or 'no response detail'}"
+                )
                 failed += 1
 
             time.sleep(0.3)
 
     print(f"\n  Total: {success} imported, {updated} updated, {failed} failed")
     print(f"  Captured {len(name_to_id)} workflow name→ID mappings\n")
+    if failures:
+        raise RuntimeError("Workflow imports failed:\n  - " + "\n  - ".join(failures))
     return name_to_id
 
 
@@ -1085,6 +1267,20 @@ def create_tools(workflow_name_to_id):
                 continue
             tools_seen[name] = tool
 
+    context_definitions = [
+        tool for tool in tools_seen.values() if tool["name"] == "Bounded Alert Context"
+    ]
+    try:
+        if len(context_definitions) != 1:
+            raise AlertContextConfigurationError(
+                "exactly one bounded alert-context tool is required"
+            )
+        build_alert_context_tool(context_definitions[0])
+        validate_alert_context_schema()
+    except AlertContextConfigurationError as error:
+        print(f"  [CONFIGURATION ERROR] {error}")
+        return {}
+
     print(f"  Found {len(tools_seen)} unique tools across {len(agent_defs)} agents\n")
 
     tool_name_to_id = {}
@@ -1104,7 +1300,9 @@ def create_tools(workflow_name_to_id):
                 print(f"    [builtin] {tool_name} → {builtin_id}")
             continue
 
-        if tool_type == "index_search":
+        if tool_name == "Bounded Alert Context":
+            payload = build_alert_context_tool(tool_def)
+        elif tool_type == "index_search":
             index_name = tool_def.get("index", "")
             payload = {
                 "id": tool_id,
@@ -1287,6 +1485,20 @@ def create_agents(tool_name_to_id):
     base_url = kibana_base_url()
     headers = kibana_headers()
     agent_defs = load_agent_definitions()
+    l1_definitions = [agent for agent in agent_defs if agent["agent_name"] == "L1 Triage Analyst"]
+    try:
+        l1_context = [
+            tool for tool in l1_definitions[0]["tools"] if tool["name"] == "Bounded Alert Context"
+        ]
+        if len(l1_definitions) != 1 or len(l1_context) != 1:
+            raise AlertContextConfigurationError(
+                "L1 requires exactly one bounded alert-context tool"
+            )
+        build_alert_context_tool(l1_context[0])
+        validate_alert_context_schema()
+    except (AlertContextConfigurationError, IndexError) as error:
+        print(f"  [CONFIGURATION ERROR] {error}")
+        return {}
 
     agent_name_to_id = {}
     created = 0
@@ -1348,6 +1560,11 @@ def create_agents(tool_name_to_id):
             print(f"    [warn] {agent_name}: {len(skipped_tools)} tool(s) not found, skipped:")
             for st in skipped_tools:
                 print(f"           - {st} (create manually in Agent Builder)")
+
+        if agent_name == "L1 Triage Analyst" and skipped_tools:
+            print("    [FAILED] L1 assignment blocked: required tool is unavailable")
+            failed += 1
+            continue
 
         payload = {
             "id": agent_id,

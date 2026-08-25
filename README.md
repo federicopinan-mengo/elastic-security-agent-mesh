@@ -82,8 +82,9 @@ The setup requires environment variables for your Elastic deployment. You can pr
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `KIBANA_SPACE` | *(default space)* | Target Kibana space for workflows and agents |
 | `INFERENCE_ENDPOINT_ID` | `.multilingual-e5-small-elasticsearch` | Inference endpoint powering semantic_text fields |
+
+Workflows and agents deploy to the Kibana `default` space.
 
 **Optional (third-party integrations):**
 
@@ -108,7 +109,7 @@ The easiest way to deploy — no local Python or dependencies required.
 
 2. **Add secrets** in your repo: Settings > Secrets and variables > Actions > New repository secret
    - Add `ELASTIC_CLOUD_URL`, `KIBANA_URL`, `ES_API_KEY`, `KIBANA_API_KEY`
-   - Add `KIBANA_SPACE` and `INFERENCE_ENDPOINT_ID` if using non-defaults
+   - Add `INFERENCE_ENDPOINT_ID` only if you override the default inference endpoint
    - Add `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` if you have them
 
 3. **Run the action**: Actions > "Deploy Security Agent Mesh" > Run workflow
@@ -123,7 +124,6 @@ export ELASTIC_CLOUD_URL=https://your-deployment.es.region.gcp.cloud.es.io
 export KIBANA_URL=https://your-deployment.kb.region.gcp.cloud.es.io
 export ES_API_KEY=your-elasticsearch-api-key
 export KIBANA_API_KEY=your-kibana-api-key
-export KIBANA_SPACE=your-space-id
 export INFERENCE_ENDPOINT_ID=.multilingual-e5-small-elasticsearch
 
 pip install requests pyyaml
