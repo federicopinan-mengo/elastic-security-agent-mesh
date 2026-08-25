@@ -41,7 +41,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install requests pyyaml
+        run: pip install requests pyyaml python-dotenv
 
       - name: Validate environment
         run: python scripts/setup.py --validate

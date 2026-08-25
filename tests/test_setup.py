@@ -24,11 +24,49 @@ from setup import (
     build_alert_context_tool,
     build_replacements,
     import_workflows,
+    load_project_env,
+    main,
     slugify,
     validate_alert_context_params,
     validate_alert_context_schema,
     validate_env,
 )
+
+
+# =============================================================================
+# Test: project environment loading
+# =============================================================================
+class TestLoadProjectEnv:
+    def test_loads_values_from_temporary_project_env_when_absent(self, tmp_path, monkeypatch):
+        (tmp_path / ".env").write_text("SETUP_TEST_DOTENV=from-file\n")
+        monkeypatch.setattr("setup.REPO_ROOT", tmp_path)
+        monkeypatch.delenv("SETUP_TEST_DOTENV", raising=False)
+
+        assert load_project_env() is True
+        assert os.environ["SETUP_TEST_DOTENV"] == "from-file"
+
+    def test_does_not_override_exported_values(self, tmp_path, monkeypatch):
+        (tmp_path / ".env").write_text("SETUP_TEST_DOTENV=from-file\n")
+        monkeypatch.setattr("setup.REPO_ROOT", tmp_path)
+        monkeypatch.setenv("SETUP_TEST_DOTENV", "from-shell")
+
+        assert load_project_env() is True
+        assert os.environ["SETUP_TEST_DOTENV"] == "from-shell"
+
+    def test_does_not_require_the_real_repository_env_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("setup.REPO_ROOT", tmp_path)
+
+        assert load_project_env() is False
+
+    def test_main_loads_project_env_before_validation(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("setup.load_project_env", lambda: calls.append("load"))
+        monkeypatch.setattr("setup.validate_env", lambda: calls.append("validate"))
+        monkeypatch.setattr("setup.sys.argv", ["setup.py", "--validate"])
+
+        main()
+
+        assert calls == ["load", "validate"]
 
 
 # =============================================================================

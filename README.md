@@ -66,7 +66,7 @@ Complete these steps in the Kibana UI before running the setup script:
 
 ### Configuration
 
-The setup requires environment variables for your Elastic deployment. You can provide these via **GitHub Actions secrets** (recommended) or **local shell exports**.
+The setup requires environment variables for your Elastic deployment. You can provide these via **GitHub Actions secrets** (recommended), a repository-root `.env` file for local use, or **local shell exports**. Local shell exports take precedence over values in `.env`.
 
 **Required:**
 
@@ -126,9 +126,11 @@ export ES_API_KEY=your-elasticsearch-api-key
 export KIBANA_API_KEY=your-kibana-api-key
 export INFERENCE_ENDPOINT_ID=.multilingual-e5-small-elasticsearch
 
-pip install requests pyyaml
+pip install requests pyyaml python-dotenv
 python scripts/setup.py
 ```
+
+Alternatively, put the same variables in a repository-root `.env` file; `scripts/setup.py` loads it automatically. Do not commit this file.
 
 #### What Phase 1 creates
 

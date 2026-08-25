@@ -44,13 +44,19 @@ from pathlib import Path
 try:
     import requests
 except ImportError:
-    print("ERROR: 'requests' package required. Install with: pip install requests pyyaml")
+    print("ERROR: 'requests' package required. Install with: pip install requests pyyaml python-dotenv")
     sys.exit(1)
 
 try:
     import yaml
 except ImportError:
-    print("ERROR: 'pyyaml' package required. Install with: pip install requests pyyaml")
+    print("ERROR: 'pyyaml' package required. Install with: pip install requests pyyaml python-dotenv")
+    sys.exit(1)
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("ERROR: 'python-dotenv' package required. Install with: pip install requests pyyaml python-dotenv")
     sys.exit(1)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -83,6 +89,11 @@ ALERT_CONTEXT_QUERY = "\n".join(
 
 
 AlertContextConfigurationError = ValueError
+
+
+def load_project_env():
+    """Load repository configuration without overriding shell or CI values."""
+    return load_dotenv(dotenv_path=REPO_ROOT / ".env", override=False)
 
 
 def validate_alert_context_params(params):
@@ -1775,6 +1786,8 @@ def print_manual_steps():
 
 
 def main():
+    load_project_env()
+
     parser = argparse.ArgumentParser(description="Elastic Security Agent Mesh setup")
     parser.add_argument("--validate", action="store_true", help="Validate env vars only")
     parser.add_argument("--indices-only", action="store_true", help="Only create indices")
