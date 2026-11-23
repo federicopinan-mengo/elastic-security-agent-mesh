@@ -152,7 +152,7 @@ semantics of every request. This phase only changes how a request is issued and 
 | T8 | S10 | Minimal-permissions doc + retry alerting with a verifiable test | parent | done | `bc710b2` (workflow), `f63a047` (test), docs commit (least privilege) |
 | T9 | S11 | `docs/security/remediacion-auditoria.md` + final report | parent | done | docs commit |
 | T10 | S12 | Stack 9.5.7: `security.*` domain steps, strict validator, docs pinned to 9.5.7 | parent | done | `c49f737`, `5cafd5a`, docs commit |
-| T11 | S13 | Deploy authentication by API key **or** user and password (`scripts/auth.py`) | parent | done | see Log L7 |
+| T11 | S13 | Deploy authentication by API key **or** user and password (`scripts/auth.py`) | parent | done | `17559cc`, `d8ada13`, `2053e5b` |
 
 ## Log
 
