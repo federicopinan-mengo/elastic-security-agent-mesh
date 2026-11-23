@@ -20,6 +20,7 @@ description: Create the agent-registry index for agent mesh routing and discover
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - setup
   - infrastructure
@@ -34,19 +35,15 @@ inputs:
     default: ".multilingual-e5-small-elasticsearch"
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   registry_index: "agent-registry"
 
 steps:
 
   - name: check_index_exists
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ consts.registry_index }}"
-      headers:
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.registry_index }}"
     on-failure:
       continue: true
 
@@ -63,13 +60,12 @@ steps:
     else:
 
       - name: create_registry_index
-        type: http
+        type: elasticsearch.request
         with:
           method: PUT
-          url: "{{ consts.es_url }}/{{ consts.registry_index }}"
+          path: "/{{ consts.registry_index }}"
           headers:
             Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
           body:
             settings:
               number_of_shards: 1

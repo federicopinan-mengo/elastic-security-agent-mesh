@@ -17,6 +17,7 @@ description: Create the action-policies index for governance tier definitions.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - setup
   - infrastructure
@@ -26,19 +27,15 @@ triggers:
   - type: manual
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   index_name: "action-policies"
 
 steps:
 
   - name: check_index_exists
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ consts.index_name }}"
-      headers:
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.index_name }}"
     on-failure:
       continue: true
 
@@ -55,13 +52,12 @@ steps:
     else:
 
       - name: create_index
-        type: http
+        type: elasticsearch.request
         with:
           method: PUT
-          url: "{{ consts.es_url }}/{{ consts.index_name }}"
+          path: "/{{ consts.index_name }}"
           headers:
             Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
           body:
             settings:
               number_of_shards: 1
