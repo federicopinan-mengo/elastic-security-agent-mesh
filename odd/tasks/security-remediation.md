@@ -227,11 +227,17 @@ unknown step type instead of warning and recurses into the bodies of `if`, `fore
 (`5cafd5a`); the documentation states 9.5.7 as the minimum and records what 9.5 added (domain steps, case
 triggers, workflow version history, JSON Schema inputs, `secretQueryParams`, `connector_ids`, Cases as Data).
 
-Slice boundary: the branch carries 4690 authored changed lines across 9 commits since `origin/main`, past the
+Slice boundary: the branch carries 4800 authored changed lines across 11 commits since `origin/main`, past the
 ~400-line review slice. The slices are `38d75df` (security workflows), `bc710b2` (platform workflows and the retry
 alert), `a64b76c` (index bootstrap workflows), `f63a047` (secret guard and retry alert tests), `8971167` (CI, seed
 and validator tests), `c897c84` (idempotent deploy and connector provisioning), `2db4739` (documentation),
-`c49f737` (security domain steps) and `5cafd5a` (strict validator).
+`c49f737` (security domain steps), `5cafd5a` (strict validator), `1109831` (stack 9.5.7 documentation) and
+`ea000f4` (close reason).
+
+One deliberate semantic change came with the domain steps: `mark-alert-as-closed` declares a `reason` input that the
+old REST call never sent, so the reason was silently dropped. The domain step takes a `close_reason`, so the input
+is forwarded now, and its default moved from `false_positive` to `other` so that an alert closed without an
+explicit reason is not counted as a false positive.
 
 Deferred to a later increment, documented in `docs/elastic-platform-reference.md`: the five case workflows still
 call `/api/cases` through `kibana.request` — the `cases.*` steps are the typed replacement, but their per-step
