@@ -152,6 +152,7 @@ semantics of every request. This phase only changes how a request is issued and 
 | T8 | S10 | Minimal-permissions doc + retry alerting with a verifiable test | parent | done | `bc710b2` (workflow), `f63a047` (test), docs commit (least privilege) |
 | T9 | S11 | `docs/security/remediacion-auditoria.md` + final report | parent | done | docs commit |
 | T10 | S12 | Stack 9.5.7: `security.*` domain steps, strict validator, docs pinned to 9.5.7 | parent | done | `c49f737`, `5cafd5a`, docs commit |
+| T11 | S13 | Deploy authentication by API key **or** user and password (`scripts/auth.py`) | parent | done | see Log L7 |
 
 ## Log
 
@@ -243,3 +244,25 @@ Deferred to a later increment, documented in `docs/elastic-platform-reference.md
 call `/api/cases` through `kibana.request` — the `cases.*` steps are the typed replacement, but their per-step
 output shape is not documented; `approval-monitor.yaml` still polls case comments instead of using the 9.5 case
 triggers; the mesh keeps its own `approval-requests` index instead of `waitForApproval` (Preview).
+
+L7 (2026-11-23, user, request)
+> "Que queda por hacer? Sabes que tambien debemos agregar la opcion que la auth puede ser usuario/contraseña es unab unea practica"
+
+The user asked for the remaining backlog and for a second authentication mode. The mode was built:
+
+- `scripts/auth.py` is the single place that decides how a target authenticates. `auth_header()` returns
+  `ApiKey <key>` when the API key variable is set, `Basic <base64(user:password)>` when the user and password
+  pair is set, and raises `RuntimeError` when neither is complete. `auth_mode()` reports which one is in use.
+- `scripts/setup.py` (`es_headers`, `kibana_headers`, `validate_env`), `scripts/seed_ecs.py`,
+  `scripts/seed_mitre.py` and `scripts/seed_rules.py` now build their `Authorization` header through that
+  helper, so a deployment can authenticate with `ES_API_KEY` / `KIBANA_API_KEY` **or** with
+  `ES_USERNAME` + `ES_PASSWORD` / `KIBANA_USERNAME` + `KIBANA_PASSWORD`.
+- The API key wins when both are configured for the same target; a username without its password aborts the
+  run with `Set ES_API_KEY, or ES_USERNAME and ES_PASSWORD` instead of sending an anonymous request.
+- `tests/test_auth.py` (11 tests) covers the helper, the setup headers, `validate_env` and the seed headers in
+  both modes; the existing seed test that asserted the old error message was updated.
+- `.github/workflows/deploy.yml` reads the four new secrets; `README.md` and
+  `docs/security/least-privilege.md` document both modes and the trade-off (an API key is scoped and
+  revocable; a user and password attributes every call to a named identity in the audit trail but is
+  long-lived and works interactively, so it needs a scoped native user and a stored secret).
+

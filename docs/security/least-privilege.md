@@ -91,6 +91,30 @@ The deploy key needs, on top of the runtime set:
 This identity is the one that stores credentials in Kibana, so it is the one to
 rotate first and to keep out of day-to-day use. Use it only from CI.
 
+### Authentication modes
+
+Every target (Elasticsearch, Kibana) authenticates in one of two modes:
+
+| Mode | Variables | Notes |
+| --- | --- | --- |
+| API key | `ES_API_KEY`, `KIBANA_API_KEY` | Scoped, revocable, and the mode Elastic recommends for machine-to-machine calls. |
+| User and password | `ES_USERNAME` + `ES_PASSWORD`, `KIBANA_USERNAME` + `KIBANA_PASSWORD` | Every call is attributed to a named identity in the Kibana and Elasticsearch audit logs. |
+
+The API key wins when both modes are configured for the same target. A username
+without its password is rejected: the setup aborts with an explicit message
+instead of sending an anonymous request.
+
+When you use the user and password mode, use a dedicated native user with a
+scoped role — never the `elastic` superuser — and treat the password like any
+other secret: store it in the CI secret store and rotate it. The password does
+not expire on its own, and unlike an API key it also works interactively, so
+it is the weaker of the two options unless the audit trail is the goal.
+
+This choice only affects the deploy identity (`scripts/setup.py` and the seed
+scripts). It does not change how the workflows authenticate at runtime: they
+run with the credentials Kibana attaches to the execution context, never with
+the deploy credentials.
+
 ## 3. Residual risk (accepted and documented)
 
 **Kibana stores the credential of the last user who saved a workflow.** When a
@@ -115,7 +139,8 @@ Rotation is manual in Kibana (there is no automation for it in this repo):
 
 1. Create the new key for the runtime identity and the deploy identity.
 2. Update the secrets in the deployment environment
-   (`ES_API_KEY`, `KIBANA_API_KEY`) and in the connectors' secrets.
+   (`ES_API_KEY`, `KIBANA_API_KEY`, or the user and password pair) and in the
+   connectors' secrets.
 3. Re-import the workflows (`python scripts/setup.py`) so the saved objects
    carry the new credential.
 4. Revoke the old keys.

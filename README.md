@@ -74,9 +74,16 @@ The setup requires environment variables for your Elastic deployment. You can pr
 |----------|-------------|
 | `ELASTIC_CLOUD_URL` | Elasticsearch endpoint URL |
 | `KIBANA_URL` | Kibana endpoint URL |
-| `ES_API_KEY` | Elasticsearch API key (cluster + index permissions) |
-| `KIBANA_API_KEY` | Kibana API key (Workflows, Cases, Security) |
 | `LLM_CONNECTOR_ID` | The LLM connector ID for agent-to-agent calls. We recommend **Claude Sonnet 4.5** (`Anthropic-Claude-Sonnet-4-5`) — it's fast, cost-effective, and excellent at tool-calling. **Claude Opus 4.5** (`Anthropic-Claude-Opus-4-5`) is available if you need heavier reasoning but consumes significantly more tokens. Find your connector ID by running `GET kbn:/api/actions/connectors` in Kibana Dev Tools. |
+
+**Authentication (one mode per target):**
+
+| Mode | Variables | When to use it |
+|------|-----------|----------------|
+| API key | `ES_API_KEY`, `KIBANA_API_KEY` | Machine-to-machine calls. Scoped, revocable, and what Elastic recommends for automation. |
+| User and password | `ES_USERNAME` + `ES_PASSWORD`, `KIBANA_USERNAME` + `KIBANA_PASSWORD` | When the calls must be attributed to a named identity in the audit trail. Use a native user with a scoped role, never `elastic`. |
+
+The API key wins when both modes are configured for the same target. A username without its password is rejected — the setup fails instead of sending an anonymous request. See [docs/security/least-privilege.md](docs/security/least-privilege.md) for the trade-off.
 
 **Recommended:**
 
@@ -108,7 +115,7 @@ The easiest way to deploy — no local Python or dependencies required.
 1. **Fork this repository** (or push to your own)
 
 2. **Add secrets** in your repo: Settings > Secrets and variables > Actions > New repository secret
-   - Add `ELASTIC_CLOUD_URL`, `KIBANA_URL`, `ES_API_KEY`, `KIBANA_API_KEY`
+   - Add `ELASTIC_CLOUD_URL`, `KIBANA_URL`, and the credentials of your choice: `ES_API_KEY` + `KIBANA_API_KEY`, or `ES_USERNAME` + `ES_PASSWORD` + `KIBANA_USERNAME` + `KIBANA_PASSWORD`
    - Add `INFERENCE_ENDPOINT_ID` only if you override the default inference endpoint
    - Add `VIRUSTOTAL_API_KEY` and `ABUSEIPDB_API_KEY` if you have them
 
@@ -125,7 +132,6 @@ export KIBANA_URL=https://your-deployment.kb.region.gcp.cloud.es.io
 export ES_API_KEY=your-elasticsearch-api-key
 export KIBANA_API_KEY=your-kibana-api-key
 export INFERENCE_ENDPOINT_ID=.multilingual-e5-small-elasticsearch
-
 pip install requests pyyaml python-dotenv
 python scripts/setup.py
 ```
