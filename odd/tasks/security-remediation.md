@@ -152,7 +152,7 @@ semantics of every request. This phase only changes how a request is issued and 
 | T8 | S10 | Minimal-permissions doc + retry alerting with a verifiable test | parent | done | `bc710b2` (workflow), `f63a047` (test), docs commit (least privilege) |
 | T9 | S11 | `docs/security/remediacion-auditoria.md` + final report | parent | done | docs commit |
 | T10 | S12 | Stack 9.5.7: `security.*` domain steps, strict validator, docs pinned to 9.5.7 | parent | done | `c49f737`, `5cafd5a`, docs commit |
-| T11 | S13 | Deploy authentication by API key **or** user and password (`scripts/auth.py`) | parent | done | `17559cc`, `d8ada13`, `2053e5b` |
+| T11 | S13 | Deploy authentication by API key **or** user and password (`scripts/auth.py`) | parent | done | `17559cc`, `d8ada13`, `2053e5b`, `d86a3c5`, `d0c8a7f`, `186f46b`, `cfd0bc9` |
 
 ## Log
 
@@ -265,4 +265,27 @@ The user asked for the remaining backlog and for a second authentication mode. T
   `docs/security/least-privilege.md` document both modes and the trade-off (an API key is scoped and
   revocable; a user and password attributes every call to a named identity in the audit trail but is
   long-lived and works interactively, so it needs a scoped native user and a stored secret).
+
+L8 (2026-11-23, independent verification of the auth change, `Risk: item 2`)
+Two read-only verification rounds ran against the auth increment. The first one reported four defects, all
+now fixed and re-verified as PASS:
+
+- D1 (blocker): `seed_operational_knowledge` still built its Elasticsearch header by hand
+  (`"ApiKey {ES_API_KEY}"`), so a user/password deployment sent an empty credential and the two knowledge
+  documents failed with 401. It now goes through `auth_header`.
+- D2: `ensure_connectors` caught only `KeyError`, but `kibana_headers()` raises `RuntimeError` when the
+  credentials are missing; it now catches both and warns instead of raising.
+- D3: `ci.yml` never linted `scripts/auth.py`; both the lint and the format-check steps now include it.
+- D4: the least-privilege note claimed the mode choice affected `setup.py` and the seed scripts, which was
+  false while D1 stood.
+
+The second round added three findings, also fixed:
+
+- The CI test job installed only `pytest requests pyyaml`, but `scripts/setup.py` imports `python-dotenv` and
+  exits when it is missing: the suite could not even be collected, so the CI test job has been broken since
+  the `python-dotenv` change landed on `main`. The dependency is now installed.
+- The password is now rejected when blank but sent verbatim otherwise (a password may legitimately contain
+  spaces), and `auth_mode` treats a blank password as "not configured" so the mode and the header agree.
+- The guard test now covers every script under `scripts/` and both literals (`ApiKey` and `Basic `), so a
+  hand-built header cannot slip in through a new file.
 
