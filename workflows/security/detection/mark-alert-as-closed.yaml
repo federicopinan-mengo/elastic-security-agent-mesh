@@ -27,8 +27,10 @@ inputs:
     required: true
   - name: reason
     type: string
-    description: "Close reason: acknowledged, false_positive, other"
-    default: "false_positive"
+    description: >-
+      Close reason: false_positive, duplicate, true_positive,
+      benign_positive, automated_closure, other
+    default: "other"
 
 steps:
 
