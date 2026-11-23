@@ -107,19 +107,21 @@ These could not be closed from the repository and are stated explicitly:
    `docs/security/least-privilege.md` (section "Residual risk"), together with
    the rule that workflows are only ever saved by the deploy identity.
 
-## Pre-existing findings that were not fixed
+## Pre-existing findings
 
 These are defects found while auditing the converted workflows. They existed
-before this remediation and are outside the scope of the five findings, so
-they were left untouched:
+before this remediation:
 
-1. `workflows/security/enrichment/ip-reputation-check.yaml` reads the AbuseIPDB
-   score with two different paths: the report block uses
+1. `workflows/security/enrichment/ip-reputation-check.yaml` read the AbuseIPDB
+   score with two different paths: the report block used
    `steps.check_abuseipdb.output.data.data.abuseConfidenceScore` and the
-   threat assessment uses
+   threat assessment used
    `steps.check_abuseipdb.output.data.abuseConfidenceScore`. The second path
-   is one level short, so the `HIGH RISK` / `MEDIUM RISK` branches never
-   trigger and the workflow always reports `LOW RISK`.
+   was one level short, so the `HIGH RISK` / `MEDIUM RISK` branches never
+   triggered and the workflow always reported `LOW RISK`. **Fixed**: both
+   branches now read the score through the same path, and
+   `tests/test_workflow_references.py` fails when a field read twice from the
+   same step is read through two different paths.
 2. The `condition: 'steps.<name>.status: "success"'` pattern used by the
    index-creation workflows in `agents/setup/` was written for the legacy
    `http` step. It is kept as is because `.status` is a framework-level

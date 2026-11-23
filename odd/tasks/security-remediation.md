@@ -289,3 +289,11 @@ The second round added three findings, also fixed:
 - The guard test now covers every script under `scripts/` and both literals (`ApiKey` and `Basic `), so a
   hand-built header cannot slip in through a new file.
 
+L9 (2026-11-23, the pre-existing enrichment bug)
+The audit had left one defect outside the five findings: `ip-reputation-check.yaml` read the AbuseIPDB
+score through two different paths, so the `HIGH RISK` and `MEDIUM RISK` branches never triggered and the
+workflow always reported `LOW RISK`. The threat assessment now reads the score through the same path as
+the report, and two new tests guard the class of defect rather than the single instance: every
+`steps.<name>` reference must point to a step of the same workflow, and a field read twice from the same
+step must be read through the same path. Both tests fail on the original file and pass on the fixed one.
+
