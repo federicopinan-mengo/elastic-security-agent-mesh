@@ -33,7 +33,8 @@ def auth_header(api_key_var, user_var, password_var):
         return f"ApiKey {api_key}"
     username = os.environ.get(user_var, "").strip()
     password = os.environ.get(password_var, "")
-    if username and password:
+    if username and password.strip():
+        # The password is sent verbatim: only a blank one is rejected.
         return basic_auth(username, password)
     raise RuntimeError(f"Set {api_key_var}, or {user_var} and {password_var}")
 
@@ -42,6 +43,6 @@ def auth_mode(api_key_var, user_var, password_var):
     """Return "api key", "user/password" or "not configured" for one target."""
     if os.environ.get(api_key_var, "").strip():
         return "api key"
-    if os.environ.get(user_var, "").strip() and os.environ.get(password_var, ""):
+    if os.environ.get(user_var, "").strip() and os.environ.get(password_var, "").strip():
         return "user/password"
     return "not configured"
