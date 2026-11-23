@@ -17,15 +17,13 @@ name: "VirusTotal - URL Analysis Report"
 description: "Get a VirusTotal analysis report for a URL"
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - enrichment
   - virustotal
 
 triggers:
   - type: manual
-
-consts:
-  vt_api_key: "__VT_API_KEY__"
 
 inputs:
   - name: url
@@ -36,13 +34,13 @@ inputs:
 steps:
   - name: lookup_url
     type: http
+    connector-id: oputils-virustotal
+    timeout: "30s"
     with:
-      url: "https://www.virustotal.com/api/v3/urls/{{ inputs.url | base64_encode | replace: '=', '' | replace: '+', '-' | replace: '/', '_' }}"
+      path: "/urls/{{ inputs.url | base64_encode | replace: '=', '' | replace: '+', '-' | replace: '/', '_' }}"
       method: GET
       headers:
-        x-apikey: "{{ consts.vt_api_key }}"
         Accept: application/json
-      timeout: 30s
     on-failure:
       retry:
         max-attempts: 2
@@ -55,12 +53,12 @@ steps:
       message: |
         === VirusTotal URL Report ===
         URL: {{ inputs.url }}
-        
+
         Detection: {{ steps.lookup_url.output.data.data.attributes.last_analysis_stats.malicious }}/{{ steps.lookup_url.output.data.data.attributes.last_analysis_stats.malicious | plus: steps.lookup_url.output.data.data.attributes.last_analysis_stats.undetected }} engines flagged as malicious
         Reputation: {{ steps.lookup_url.output.data.data.attributes.reputation }}
         Last analysed: {{ steps.lookup_url.output.data.data.attributes.last_analysis_date }}
         Categories: {{ steps.lookup_url.output.data.data.attributes.categories | map: "value" | join: ", " }}
-        
+
         {% if steps.lookup_url.output.data.data.attributes.last_analysis_stats.malicious > 3 %}
         VERDICT: MALICIOUS — multiple engines flag this URL
         {% elsif steps.lookup_url.output.data.data.attributes.last_analysis_stats.malicious > 0 %}

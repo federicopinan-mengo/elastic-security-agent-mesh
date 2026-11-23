@@ -2,8 +2,7 @@
 # Workflow: Add Alert Tag - FP
 # Category: security/detection
 #
-# Tags a security alert as a false positive. Uses explicit HTTP auth to
-# work reliably when invoked through the agent mesh subagent chain.
+# Tags a security alert as a false positive.
 #
 # Author: Security Agent Mesh
 # =============================================================================
@@ -12,6 +11,7 @@ description: Tag a security alert as a false positive.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection
   - triage
@@ -28,14 +28,12 @@ inputs:
 steps:
 
   - name: set_fp_tag
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/detection_engine/signals/tags"
+      path: "/api/detection_engine/signals/tags"
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
       body:
         ids:
           - "{{ inputs.alertid }}"

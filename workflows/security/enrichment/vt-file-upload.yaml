@@ -17,15 +17,13 @@ name: "VirusTotal - Upload File for Scanning"
 description: "Submit a file to VirusTotal for analysis by 70+ antivirus engines"
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - enrichment
   - virustotal
 
 triggers:
   - type: manual
-
-consts:
-  vt_api_key: "__VT_API_KEY__"
 
 inputs:
   - name: file_url
@@ -36,15 +34,15 @@ inputs:
 steps:
   - name: submit_file
     type: http
+    connector-id: oputils-virustotal
+    timeout: "60s"
     with:
-      url: "https://www.virustotal.com/api/v3/files"
+      path: "/files"
       method: POST
       headers:
-        x-apikey: "{{ consts.vt_api_key }}"
         Content-Type: application/x-www-form-urlencoded
       body:
         url: "{{ inputs.file_url }}"
-      timeout: 60s
     on-failure:
       retry:
         max-attempts: 2
@@ -57,9 +55,9 @@ steps:
       message: |
         === VirusTotal File Submission ===
         Submitted: {{ inputs.file_url }}
-        
+
         Analysis ID: {{ steps.submit_file.output.data.data.id }}
         Type: {{ steps.submit_file.output.data.data.type }}
-        
+
         The file has been queued for analysis. Use the analysis ID to retrieve
         the report once processing completes (typically 1-5 minutes).

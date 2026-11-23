@@ -12,6 +12,7 @@ description: Add a comment to an existing case.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - response
   - cases
@@ -32,15 +33,12 @@ inputs:
 steps:
 
   - name: add_comment
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/cases/{{ inputs.case_id }}/comments"
+      path: "/api/cases/{{ inputs.case_id }}/comments"
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
       body:
         type: "user"
         comment: "{{ inputs.comment }}"

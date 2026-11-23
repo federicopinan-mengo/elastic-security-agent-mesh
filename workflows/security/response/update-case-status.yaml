@@ -12,6 +12,7 @@ description: Update a case status, severity, or close a case.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - response
   - cases
@@ -36,29 +37,24 @@ inputs:
 steps:
 
   - name: get_case
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/api/cases/{{ inputs.case_id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/api/cases/{{ inputs.case_id }}"
 
   - name: update_case
-    type: http
+    type: kibana.request
     with:
       method: PATCH
-      url: "__KIBANA_URL__/api/cases"
+      path: "/api/cases"
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
       body:
         cases:
           - id: "{{ inputs.case_id }}"
-            version: "{{ steps.get_case.output.data.version }}"
-            status: "{{ inputs.status | default: steps.get_case.output.data.status }}"
-            severity: "{{ inputs.severity | default: steps.get_case.output.data.severity }}"
+            version: "{{ steps.get_case.output.version }}"
+            status: "{{ inputs.status | default: steps.get_case.output.status }}"
+            severity: "{{ inputs.severity | default: steps.get_case.output.severity }}"
 
   - name: confirm
     type: console

@@ -19,10 +19,12 @@
 # Author: Security Agent Mesh
 # =============================================================================
 name: Create Detection Rule
-description: Create a new detection rule (disabled by default for governance review).
+description: "Create a new detection rule (disabled by default for governance
+  review)."
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection-engineering
 
@@ -71,14 +73,12 @@ steps:
     condition: 'inputs.rule_type: "esql"'
     steps:
       - name: post_esql_rule
-        type: http
+        type: kibana.request
         with:
           method: POST
-          url: "__KIBANA_URL__/api/detection_engine/rules"
+          path: "/api/detection_engine/rules"
           headers:
             Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
           body:
             name: "{{ inputs.name }}"
             description: "{{ inputs.description }}"
@@ -102,14 +102,12 @@ steps:
     condition: 'NOT inputs.rule_type: "esql"'
     steps:
       - name: post_standard_rule
-        type: http
+        type: kibana.request
         with:
           method: POST
-          url: "__KIBANA_URL__/api/detection_engine/rules"
+          path: "/api/detection_engine/rules"
           headers:
             Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
           body:
             name: "{{ inputs.name }}"
             description: "{{ inputs.description }}"
@@ -140,16 +138,15 @@ steps:
     condition: 'inputs.severity: "low"'
     steps:
       - name: patch_to_21
-        type: http
+        type: kibana.request
         with:
           method: PATCH
-          url: "__KIBANA_URL__/api/detection_engine/rules"
+          path: "/api/detection_engine/rules"
           headers:
             Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
           body:
-            id: "{{ steps.branch_esql.steps.post_esql_rule.output.data.id | default: steps.branch_standard.steps.post_standard_rule.output.data.id }}"
+            id: "{{ steps.branch_esql.steps.post_esql_rule.output.id | default:
+              steps.branch_standard.steps.post_standard_rule.output.id }}"
             risk_score: 21
         on-failure:
           continue: true
@@ -159,16 +156,15 @@ steps:
     condition: 'inputs.severity: "high"'
     steps:
       - name: patch_to_73
-        type: http
+        type: kibana.request
         with:
           method: PATCH
-          url: "__KIBANA_URL__/api/detection_engine/rules"
+          path: "/api/detection_engine/rules"
           headers:
             Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
           body:
-            id: "{{ steps.branch_esql.steps.post_esql_rule.output.data.id | default: steps.branch_standard.steps.post_standard_rule.output.data.id }}"
+            id: "{{ steps.branch_esql.steps.post_esql_rule.output.id | default:
+              steps.branch_standard.steps.post_standard_rule.output.id }}"
             risk_score: 73
         on-failure:
           continue: true
@@ -178,16 +174,15 @@ steps:
     condition: 'inputs.severity: "critical"'
     steps:
       - name: patch_to_99
-        type: http
+        type: kibana.request
         with:
           method: PATCH
-          url: "__KIBANA_URL__/api/detection_engine/rules"
+          path: "/api/detection_engine/rules"
           headers:
             Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
           body:
-            id: "{{ steps.branch_esql.steps.post_esql_rule.output.data.id | default: steps.branch_standard.steps.post_standard_rule.output.data.id }}"
+            id: "{{ steps.branch_esql.steps.post_esql_rule.output.id | default:
+              steps.branch_standard.steps.post_standard_rule.output.id }}"
             risk_score: 99
         on-failure:
           continue: true
@@ -195,11 +190,19 @@ steps:
   - name: confirm
     type: console
     with:
-      message: |
-        Rule created (DISABLED):
-        Name: {{ steps.branch_esql.steps.post_esql_rule.output.data.name | default: steps.branch_standard.steps.post_standard_rule.output.data.name }}
-        ID: {{ steps.branch_esql.steps.post_esql_rule.output.data.id | default: steps.branch_standard.steps.post_standard_rule.output.data.id }}
-        Rule ID: {{ steps.branch_esql.steps.post_esql_rule.output.data.rule_id | default: steps.branch_standard.steps.post_standard_rule.output.data.rule_id }}
-        Type: {{ steps.branch_esql.steps.post_esql_rule.output.data.type | default: steps.branch_standard.steps.post_standard_rule.output.data.type }}
-        Severity: {{ steps.branch_esql.steps.post_esql_rule.output.data.severity | default: steps.branch_standard.steps.post_standard_rule.output.data.severity }}
-        Note: Rule is disabled. Use Enable/Disable Rule to activate after governance review.
+      message: "Rule created (DISABLED):\n\
+        Name: {{ steps.branch_esql.steps.post_esql_rule.output.name | default:
+        steps.branch_standard.steps.post_standard_rule.output.name }}\n\
+        ID: {{ steps.branch_esql.steps.post_esql_rule.output.id | default:
+        steps.branch_standard.steps.post_standard_rule.output.id }}\n\
+        Rule ID: {{ steps.branch_esql.steps.post_esql_rule.output.rule_id |
+        default: steps.branch_standard.steps.post_standard_rule.output.rule_id
+        }}\n\
+        Type: {{ steps.branch_esql.steps.post_esql_rule.output.type | default:
+        steps.branch_standard.steps.post_standard_rule.output.type }}\n\
+        Severity: {{ steps.branch_esql.steps.post_esql_rule.output.severity |
+        default: steps.branch_standard.steps.post_standard_rule.output.severity
+        }}\n\
+        Note: Rule is disabled. Use Enable/Disable Rule to activate after
+        governance review.\n\
+        "

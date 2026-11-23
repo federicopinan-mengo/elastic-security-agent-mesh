@@ -12,6 +12,7 @@ description: Set a security alert status to acknowledged.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection
   - triage
@@ -28,14 +29,12 @@ inputs:
 steps:
 
   - name: acknowledge_alert
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/detection_engine/signals/status"
+      path: "/api/detection_engine/signals/status"
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
       body:
         signal_ids:
           - "{{ inputs.alertid }}"

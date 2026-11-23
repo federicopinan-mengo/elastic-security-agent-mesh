@@ -33,6 +33,7 @@ description: Alert-triggered triage that creates an investigation and routes to 
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - triage
   - response
@@ -41,8 +42,6 @@ triggers:
   - type: alert
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   investigation_index: "investigation-contexts"
   registry_index: "agent-registry"
   alerts_index: ".alerts-security.alerts-*"
@@ -60,15 +59,12 @@ steps:
       message: "inv-{{ event.alerts[0]._id }}-{{ 'now' | date: '%s' }}"
 
   - name: create_investigation
-    type: http
+    type: elasticsearch.request
     on-failure:
       continue: true
     with:
       method: PUT
-      url: "{{ consts.es_url }}/{{ consts.investigation_index }}/_create/{{ steps.investigation_doc_id.output }}"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.investigation_index }}/_create/{{ steps.investigation_doc_id.output }}"
       body:
         investigation_id: "{{ steps.investigation_doc_id.output }}"
         title: "Alert Triage: {{ event.alerts[0].kibana.alert.rule.name }}"
@@ -91,13 +87,13 @@ steps:
 
   # ── Safe extraction of creation result ────────────────────────────────────
   # When _create returns 409 (duplicate), on-failure: continue sets the step
-  # output to null. Accessing output.data.result on null would throw a
+  # output to null. Accessing output.result on null would throw a
   # TypeError in the KQL condition. The console step with Liquid | default
   # safely extracts the result: "created" on success, "duplicate" on failure.
   - name: creation_result
     type: console
     with:
-      message: "{{ steps.create_investigation.output.data.result | default: 'duplicate' }}"
+      message: "{{ steps.create_investigation.output.result | default: 'duplicate' }}"
 
   # ── Deduplication gate ────────────────────────────────────────────────────
   # Only proceed with L1 if the investigation was genuinely new ("created").
@@ -114,13 +110,10 @@ steps:
           message: "Investigation created for alert {{ event.alerts[0]._id }}: {{ event.alerts[0].kibana.alert.rule.name }}"
 
       - name: find_analyst_agent
-        type: http
+        type: elasticsearch.request
         with:
           method: POST
-          url: "{{ consts.es_url }}/{{ consts.registry_index }}/_search"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.registry_index }}/_search"
           body:
             size: 1
             query:
@@ -132,18 +125,15 @@ steps:
                       domain: "triage"
 
       - name: update_assignment
-        type: http
+        type: elasticsearch.request
         on-failure:
           continue: true
         with:
           method: POST
-          url: "{{ consts.es_url }}/{{ consts.investigation_index }}/_update/{{ steps.investigation_doc_id.output }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.investigation_index }}/_update/{{ steps.investigation_doc_id.output }}"
           body:
             doc:
-              assigned_agent: "{{ steps.find_analyst_agent.output.data.hits.hits[0]._source.agent_id }}"
+              assigned_agent: "{{ steps.find_analyst_agent.output.hits.hits[0]._source.agent_id }}"
               status: "investigating"
               updated_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
@@ -152,7 +142,7 @@ steps:
         on-failure:
           continue: true
         with:
-          agent_id: "{{ steps.find_analyst_agent.output.data.hits.hits[0]._source.agent_id }}"
+          agent_id: "{{ steps.find_analyst_agent.output.hits.hits[0]._source.agent_id }}"
           message: |
             Triage this security alert. Investigation document ID: {{ steps.investigation_doc_id.output }}
 
@@ -183,15 +173,12 @@ steps:
           message: "L1 agent response: {{ steps.invoke_analyst.output }}"
 
       - name: record_analyst_evidence
-        type: http
+        type: elasticsearch.request
         on-failure:
           continue: true
         with:
           method: POST
-          url: "{{ consts.es_url }}/{{ consts.investigation_index }}/_update/{{ steps.investigation_doc_id.output }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.investigation_index }}/_update/{{ steps.investigation_doc_id.output }}"
           body:
             script:
               source: |
@@ -200,7 +187,7 @@ steps:
                 ctx._source.updated_at = params.now;
               params:
                 entry:
-                  agent_id: "{{ steps.find_analyst_agent.output.data.hits.hits[0]._source.agent_id }}"
+                  agent_id: "{{ steps.find_analyst_agent.output.hits.hits[0]._source.agent_id }}"
                   timestamp: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
                   evidence_type: "finding"
                   content: "{{ steps.invoke_analyst.output }}"

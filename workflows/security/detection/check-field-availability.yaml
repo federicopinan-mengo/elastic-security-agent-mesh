@@ -10,10 +10,12 @@
 # Author: Security Agent Mesh
 # =============================================================================
 name: Check Field Availability
-description: Verify that ECS fields exist in logs-* before creating detection rules.
+description: "Verify that ECS fields exist in logs-* before creating detection
+  rules."
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection-engineering
 
@@ -23,7 +25,8 @@ triggers:
 inputs:
   - name: field_names
     type: string
-    description: "Comma-separated list of field names to check (e.g., 'process.name,event.action,source.ip')"
+    description: "Comma-separated list of field names to check (e.g.,
+      'process.name,event.action,source.ip')"
     required: true
   - name: index_pattern
     type: string
@@ -34,20 +37,13 @@ inputs:
     description: "How far back to look for data"
     default: "7d"
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-
 steps:
 
   - name: check_fields
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ inputs.index_pattern }}/_field_caps"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ inputs.index_pattern }}/_field_caps"
       body:
         fields: "{{ inputs.field_names }}"
 
@@ -57,5 +53,4 @@ steps:
       message: |
         Field availability check for index pattern: {{ inputs.index_pattern }}
         Fields requested: {{ inputs.field_names }}
-        Results: {{ steps.check_fields.output.data.fields }}
-
+        Results: {{ steps.check_fields.output.fields }}

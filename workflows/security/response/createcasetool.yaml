@@ -13,6 +13,7 @@ description: Create an Elastic Security case for incident tracking.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - response
   - cases
@@ -37,14 +38,12 @@ inputs:
 steps:
 
   - name: create_case
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/cases"
+      path: "/api/cases"
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
       body:
         title: "{{ inputs.caseTitle }}"
         description: "{{ inputs.caseDescription }}"
@@ -66,7 +65,7 @@ steps:
     with:
       message: |
         Case created successfully.
-        Case ID: {{ steps.create_case.output.data.id }}
-        Title: {{ steps.create_case.output.data.title }}
-        Severity: {{ steps.create_case.output.data.severity }}
-        Owner: {{ steps.create_case.output.data.owner }}
+        Case ID: {{ steps.create_case.output.id }}
+        Title: {{ steps.create_case.output.title }}
+        Severity: {{ steps.create_case.output.severity }}
+        Owner: {{ steps.create_case.output.owner }}

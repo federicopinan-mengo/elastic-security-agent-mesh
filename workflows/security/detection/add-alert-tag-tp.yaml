@@ -12,6 +12,7 @@ description: Tag a security alert as a true positive.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection
   - triage
@@ -28,14 +29,12 @@ inputs:
 steps:
 
   - name: set_tp_tag
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/detection_engine/signals/tags"
+      path: "/api/detection_engine/signals/tags"
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
       body:
         ids:
           - "{{ inputs.alertid }}"

@@ -17,6 +17,7 @@ name: IP Reputation Check
 description: Check IP address reputation using AbuseIPDB and enrich with geolocation data.
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - enrichment
 
@@ -31,8 +32,6 @@ tags:
 #   - Values that may need to change across environments
 # ---------------------------------------------------------------------------
 consts:
-  api_key: "__ABUSEIPDB_API_KEY__"
-  abuseipdb_base_url: https://api.abuseipdb.com/api/v2
   ipapi_base_url: http://ip-api.com/json
 
 # ---------------------------------------------------------------------------
@@ -91,11 +90,15 @@ steps:
 # -------------------------------------------------------------------------
 - name: check_abuseipdb
   type: http
+  connector-id: oputils-abuseipdb
   with:
-    url: "{{ consts.abuseipdb_base_url }}/check?ipAddress={{ inputs.ip_address }}&maxAgeInDays=90&verbose=true"
+    path: "/check"
     method: GET
+    query:
+      ipAddress: "{{ inputs.ip_address }}"
+      maxAgeInDays: 90
+      verbose: true
     headers:
-      Key: "{{ consts.api_key }}"
       Accept: application/json
   on-failure:
     retry:
@@ -141,7 +144,7 @@ steps:
     message: |
       === IP Threat Intelligence Report ===
       IP Address: {{ inputs.ip_address }}
-      
+
       AbuseIPDB Results:
       - Abuse Confidence Score: {{ steps.check_abuseipdb.output.data.data.abuseConfidenceScore }}%
       - Total Reports: {{ steps.check_abuseipdb.output.data.data.totalReports }}
@@ -150,7 +153,7 @@ steps:
       - Usage Type: {{ steps.check_abuseipdb.output.data.data.usageType }}
       - ISP: {{ steps.check_abuseipdb.output.data.data.isp }}
       - Domain: {{ steps.check_abuseipdb.output.data.data.domain }}
-      
+
       Geolocation Results:
       - Country: {{ steps.get_geolocation.output.data.country }} ({{ steps.get_geolocation.output.data.countryCode }})
       - Region: {{ steps.get_geolocation.output.data.regionName }}
@@ -161,7 +164,7 @@ steps:
       - Is Proxy: {{ steps.get_geolocation.output.data.proxy }}
       - Is Hosting: {{ steps.get_geolocation.output.data.hosting }}
       - Is Mobile: {{ steps.get_geolocation.output.data.mobile }}
-      
+
       Threat Assessment:
       {% if steps.check_abuseipdb.output.data.abuseConfidenceScore > 75 %}
       \u26A0\uFE0F HIGH RISK - This IP has a high abuse confidence score
