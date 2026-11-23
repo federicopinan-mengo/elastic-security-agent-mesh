@@ -310,13 +310,15 @@ class TestSeedFailureHandling:
         assert exc_info.value.code == 1
         assert "ELASTIC_CLOUD_URL environment variable not set" in capsys.readouterr().out
 
-    def test_mitre_requires_an_api_key(self, monkeypatch, capsys):
+    def test_mitre_requires_credentials(self, monkeypatch, capsys):
         monkeypatch.setenv("ELASTIC_CLOUD_URL", ES_URL)
         monkeypatch.delenv("ES_API_KEY", raising=False)
+        monkeypatch.delenv("ES_USERNAME", raising=False)
+        monkeypatch.delenv("ES_PASSWORD", raising=False)
         with pytest.raises(SystemExit) as exc_info:
             seed_mitre.main()
         assert exc_info.value.code == 1
-        assert "ES_API_KEY environment variable not set" in capsys.readouterr().out
+        assert "Set ES_API_KEY, or ES_USERNAME and ES_PASSWORD" in capsys.readouterr().out
 
     def test_mitre_exits_when_the_download_fails(self, es_env, capsys):
         fake = FakeHTTP()

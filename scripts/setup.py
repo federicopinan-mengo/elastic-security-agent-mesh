@@ -11,6 +11,12 @@ Set required variables before running (see README.md for full instructions):
     export ES_API_KEY=your-es-api-key
     export KIBANA_API_KEY=your-kibana-api-key
 
+Or authenticate with a user and a password instead of an API key:
+    export ES_USERNAME=your-es-user
+    export ES_PASSWORD=your-es-password
+    export KIBANA_USERNAME=your-kibana-user
+    export KIBANA_PASSWORD=your-kibana-password
+
 Usage:
     python scripts/setup.py                    # Run full setup (indices → policies → workflows → tools → agents → registry)
     python scripts/setup.py --indices-only     # Only create indices
@@ -60,9 +66,17 @@ except ImportError:
     )
     sys.exit(1)
 
+from auth import auth_header, auth_mode
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-REQUIRED_ENV_VARS = ["ELASTIC_CLOUD_URL", "KIBANA_URL", "ES_API_KEY", "KIBANA_API_KEY"]
+REQUIRED_ENV_VARS = ["ELASTIC_CLOUD_URL", "KIBANA_URL"]
+
+# Each target authenticates with an API key or with a user and a password.
+AUTH_TARGETS = [
+    ("Elasticsearch", "ES_API_KEY", "ES_USERNAME", "ES_PASSWORD"),
+    ("Kibana", "KIBANA_API_KEY", "KIBANA_USERNAME", "KIBANA_PASSWORD"),
+]
 
 ALERT_CONTEXT_PROFILE = "bounded-alert-context-v1"
 ALERT_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,512}$")
@@ -221,6 +235,9 @@ CONNECTOR_SPECS = (
 def validate_env():
     """Check that all required environment variables are set."""
     missing = [v for v in REQUIRED_ENV_VARS if not os.environ.get(v)]
+    for _label, api_key_var, user_var, password_var in AUTH_TARGETS:
+        if auth_mode(api_key_var, user_var, password_var) == "not configured":
+            missing.append(f"{api_key_var} or {user_var} and {password_var}")
     if missing:
         print("ERROR: Missing required environment variables:")
         for v in missing:
@@ -232,6 +249,8 @@ def validate_env():
     print("Environment validated:")
     print(f"  Elasticsearch: {os.environ['ELASTIC_CLOUD_URL']}")
     print(f"  Kibana:        {os.environ['KIBANA_URL']}")
+    for label, api_key_var, user_var, password_var in AUTH_TARGETS:
+        print(f"  {label} auth: {auth_mode(api_key_var, user_var, password_var)}")
     print("  Space:         default (hardcoded)")
     print()
 
@@ -239,7 +258,7 @@ def validate_env():
 def es_headers():
     return {
         "Content-Type": "application/json",
-        "Authorization": f"ApiKey {os.environ['ES_API_KEY']}",
+        "Authorization": auth_header("ES_API_KEY", "ES_USERNAME", "ES_PASSWORD"),
     }
 
 
@@ -248,7 +267,7 @@ def kibana_headers():
         "Content-Type": "application/json",
         "kbn-xsrf": "true",
         "x-elastic-internal-origin": "Kibana",
-        "Authorization": f"ApiKey {os.environ['KIBANA_API_KEY']}",
+        "Authorization": auth_header("KIBANA_API_KEY", "KIBANA_USERNAME", "KIBANA_PASSWORD"),
     }
 
 

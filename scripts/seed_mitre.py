@@ -4,6 +4,8 @@ import os
 import sys
 from datetime import UTC, datetime
 
+from auth import auth_header
+
 try:
     import requests
 except ImportError:
@@ -17,13 +19,14 @@ INDEX_NAME = "kb-mitre-attack"
 
 
 def es_headers():
-    api_key = os.environ.get("ES_API_KEY")
-    if not api_key:
-        print("ERROR: ES_API_KEY environment variable not set.")
+    try:
+        auth = auth_header("ES_API_KEY", "ES_USERNAME", "ES_PASSWORD")
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
     return {
         "Content-Type": "application/x-ndjson",
-        "Authorization": f"ApiKey {api_key}",
+        "Authorization": auth,
     }
 
 

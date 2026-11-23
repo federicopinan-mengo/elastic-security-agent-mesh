@@ -4,6 +4,8 @@ import os
 import sys
 from datetime import UTC, datetime
 
+from auth import auth_header
+
 try:
     import requests
 except ImportError:
@@ -14,25 +16,27 @@ INDEX_NAME = "kb-detection-rules"
 
 
 def kibana_headers():
-    api_key = os.environ.get("KIBANA_API_KEY")
-    if not api_key:
-        print("ERROR: KIBANA_API_KEY environment variable not set.")
+    try:
+        auth = auth_header("KIBANA_API_KEY", "KIBANA_USERNAME", "KIBANA_PASSWORD")
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
     return {
         "Content-Type": "application/json",
         "kbn-xsrf": "true",
-        "Authorization": f"ApiKey {api_key}",
+        "Authorization": auth,
     }
 
 
 def es_headers():
-    api_key = os.environ.get("ES_API_KEY")
-    if not api_key:
-        print("ERROR: ES_API_KEY environment variable not set.")
+    try:
+        auth = auth_header("ES_API_KEY", "ES_USERNAME", "ES_PASSWORD")
+    except RuntimeError as exc:
+        print(f"ERROR: {exc}")
         sys.exit(1)
     return {
         "Content-Type": "application/x-ndjson",
-        "Authorization": f"ApiKey {api_key}",
+        "Authorization": auth,
     }
 
 
