@@ -77,6 +77,22 @@ def test_auth_mode_reports_the_configured_mode(monkeypatch):
     assert auth.auth_mode("ES_API_KEY", "ES_USERNAME", "ES_PASSWORD") == "api key"
 
 
+def test_a_whitespace_only_api_key_falls_back_to_the_user_and_password(monkeypatch):
+    monkeypatch.setenv("ES_API_KEY", "   ")
+    monkeypatch.setenv("ES_USERNAME", "user")
+    monkeypatch.setenv("ES_PASSWORD", "password")
+    header = auth.auth_header("ES_API_KEY", "ES_USERNAME", "ES_PASSWORD")
+    assert header == auth.basic_auth("user", "password")
+
+
+def test_no_script_builds_an_authorization_header_by_hand():
+    """Every Authorization header must go through scripts/auth.py."""
+    scripts = Path(__file__).resolve().parent.parent / "scripts"
+    for name in ("setup.py", "seed_ecs.py", "seed_mitre.py", "seed_rules.py"):
+        source = (scripts / name).read_text()
+        assert "ApiKey" not in source, f"{name} builds an Authorization header by hand"
+
+
 def test_setup_headers_use_the_api_key(monkeypatch):
     monkeypatch.setenv("ES_API_KEY", "es-key")
     monkeypatch.setenv("KIBANA_API_KEY", "kibana-key")

@@ -83,7 +83,7 @@ The setup requires environment variables for your Elastic deployment. You can pr
 | API key | `ES_API_KEY`, `KIBANA_API_KEY` | Machine-to-machine calls. Scoped, revocable, and what Elastic recommends for automation. |
 | User and password | `ES_USERNAME` + `ES_PASSWORD`, `KIBANA_USERNAME` + `KIBANA_PASSWORD` | When the calls must be attributed to a named identity in the audit trail. Use a native user with a scoped role, never `elastic`. |
 
-The API key wins when both modes are configured for the same target. A username without its password is rejected — the setup fails instead of sending an anonymous request. See [docs/security/least-privilege.md](docs/security/least-privilege.md) for the trade-off.
+The API key wins when both modes are configured for the same target. A username without its password is rejected — the setup fails instead of sending an anonymous request. If your repository `.env` still holds an API key, that key wins too: remove it to use the second mode. See [docs/security/least-privilege.md](docs/security/least-privilege.md) for the trade-off.
 
 **Recommended:**
 

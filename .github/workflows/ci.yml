@@ -71,7 +71,9 @@ jobs:
         run: pip install ruff
 
       - name: Run Ruff linter
-        run: ruff check scripts/setup.py scripts/seed_*.py
+        run: ruff check scripts/setup.py scripts/auth.py scripts/seed_*.py
 
       - name: Run Ruff formatter check
-        run: ruff format --check scripts/setup.py scripts/seed_*.py
+        run: >
+          ruff format --check
+          scripts/setup.py scripts/auth.py scripts/seed_*.py

@@ -339,6 +339,9 @@ def ensure_connectors():
     except KeyError as exc:
         print(f"  [WARN] {exc.args[0]} is not set — skipping connector provisioning")
         return []
+    except RuntimeError as exc:
+        print(f"  [WARN] {exc} — skipping connector provisioning")
+        return []
 
     try:
         listing = requests.get(f"{base_url}/api/actions/connectors", headers=headers, timeout=30)
@@ -897,10 +900,9 @@ def seed_operational_knowledge():
     print("=== Seeding Operational Knowledge ===\n")
 
     es_url = os.environ.get("ELASTIC_CLOUD_URL", "").strip()
-    api_key = os.environ.get("ES_API_KEY", "").strip()
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"ApiKey {api_key}",
+        "Authorization": auth_header("ES_API_KEY", "ES_USERNAME", "ES_PASSWORD"),
     }
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
