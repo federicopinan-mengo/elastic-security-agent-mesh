@@ -38,6 +38,9 @@ S10 — Phase 5: permissions and retry alerting
 S11 — Phase 6: closing document
 > "FASE 6 — CIERRE: escribir docs/security/remediacion-auditoria.md con tabla: hallazgo → archivo:línea → qué cambió → cómo se verifica → qué queda abierto. Listar explícitamente como abiertos: rotación de claves (manual en Kibana), verificación server-side del step type ai.agent, contenido real de .env (solo nombres de variables), y el comportamiento de la API key almacenada por Kibana ante ediciones manuales en la UI."
 
+S12 — Stack 9.5.7 alignment
+> "Eso esta perfecto, ahora mismo estamos en la version 9.5.7 asi que podes ir a buscar el changelog del nuevo release y podes estar al dia con la solucion y stack de elastic"
+
 ## Conversion contract
 
 Authoritative rules for Phase 1b. Derived from Kibana 9.4 source (`workflows_execution_engine/server/step/{elasticsearch_action_step,kibana_action_step,connector_step}.ts`,
@@ -148,6 +151,7 @@ semantics of every request. This phase only changes how a request is issued and 
 | T7 | S9 | OpenWebUI marked as plan, not implemented | parent | done | docs commit |
 | T8 | S10 | Minimal-permissions doc + retry alerting with a verifiable test | parent | done | `bc710b2` (workflow), `f63a047` (test), docs commit (least privilege) |
 | T9 | S11 | `docs/security/remediacion-auditoria.md` + final report | parent | done | docs commit |
+| T10 | S12 | Stack 9.5.7: `security.*` domain steps, strict validator, docs pinned to 9.5.7 | parent | done | `c49f737`, `5cafd5a`, docs commit |
 
 ## Log
 
@@ -213,3 +217,23 @@ is written atomically. The details are in `docs/security/remediacion-auditoria.m
 Open, not verifiable from the repository: the manual key rotation in Kibana, the server-side behaviour of
 the `ai.agent` step, the real content of the local environment file, and the credential Kibana keeps for the
 last user who saved a workflow.
+
+L6 (2026-11-23, stack 9.5.7) — The stack is pinned to 9.5.7 (S12). 9.5.7 is the minimum because it fixes rules
+edited by a workflow failing with `api key has been invalidated` (Kibana #300667), which is the path taken by the
+three rule workflows. What 9.5 added and what it changed here: the `security.*` domain steps are generally
+available, so the alert status, alert tag and rule enable/disable calls moved to `security.setAlertStatus`,
+`security.setAlertTags`, `security.enableRule` and `security.disableRule` (`c49f737`); the validator rejects an
+unknown step type instead of warning and recurses into the bodies of `if`, `foreach` and `parallel` steps
+(`5cafd5a`); the documentation states 9.5.7 as the minimum and records what 9.5 added (domain steps, case
+triggers, workflow version history, JSON Schema inputs, `secretQueryParams`, `connector_ids`, Cases as Data).
+
+Slice boundary: the branch carries 4690 authored changed lines across 9 commits since `origin/main`, past the
+~400-line review slice. The slices are `38d75df` (security workflows), `bc710b2` (platform workflows and the retry
+alert), `a64b76c` (index bootstrap workflows), `f63a047` (secret guard and retry alert tests), `8971167` (CI, seed
+and validator tests), `c897c84` (idempotent deploy and connector provisioning), `2db4739` (documentation),
+`c49f737` (security domain steps) and `5cafd5a` (strict validator).
+
+Deferred to a later increment, documented in `docs/elastic-platform-reference.md`: the five case workflows still
+call `/api/cases` through `kibana.request` — the `cases.*` steps are the typed replacement, but their per-step
+output shape is not documented; `approval-monitor.yaml` still polls case comments instead of using the 9.5 case
+triggers; the mesh keeps its own `approval-requests` index instead of `waitForApproval` (Preview).

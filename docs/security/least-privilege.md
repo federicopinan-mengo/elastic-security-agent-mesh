@@ -13,16 +13,26 @@ This repo deploys two different things, and they need two different identities:
 Never use a `superuser` key for either. The sets below are the minimum this
 repo needs; anything not listed here is out of scope on purpose.
 
+This describes Elastic Stack 9.5.7.
+
 ## 1. Runtime identity (workflow execution)
 
 | Capability | Needed for | Minimum |
 | --- | --- | --- |
 | Read/write the repo indices | `elasticsearch.request` steps | `read`, `write`, `create_index` on the indices listed below |
 | Read/write cases | `kibana.request` steps that POST to `/api/cases/...` | `cases:write` (includes comment + status) |
-| Read/write detection rules | `kibana.request` steps that hit `/api/detection_engine/rules` | detection rules read + write |
-| Read/write alerts | `kibana.request` steps that hit `/api/detection_engine/signals/...` | alerts read + write |
+| Read/write detection rules | `kibana.request` steps that hit `/api/detection_engine/rules`, plus `security.enableRule` and `security.disableRule` | detection rules read + write, including rule enable/disable |
+| Read/write alerts | `kibana.request` steps that hit `/api/detection_engine/signals/...`, plus `security.setAlertStatus` and `security.setAlertTags` | alerts read + write, including alert status and alert tag management |
 | Execute response actions | `kibana.request` steps that hit `/api/endpoint/action/...` | endpoint response-action execute |
 | Run the workflow | workflow execution | `workflowsManagement:execute` |
+
+The `security.*` steps (generally available since 9.5) carry the same privileges as the REST calls they
+replace: alert status, alert tags, and rule enable/disable are authorized separately. Elastic also authorizes
+alert mutations per rule type — the 9.5.7 release notes fix a bug where bulk alert untracking ignored those
+boundaries — so a role that manages alerts for one rule type must not be assumed to manage another.
+
+Cases as Data is enabled by default from 9.5, so case analytics land in their own indices. No workflow in this
+repo reads them; grant read access to the `.ds-cases-*` indices only if an analytics workflow is added.
 
 ### Elasticsearch indices in scope
 

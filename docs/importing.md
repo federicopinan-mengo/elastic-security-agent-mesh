@@ -21,7 +21,7 @@ Before importing workflows, ensure you have:
 
 ### 1. Kibana Access
 
-- Elastic Stack 9.4 or later (Kibana 9.4+) with Workflows feature enabled (Via Advanced Settings)
+- Elastic Stack 9.5.7 or later (Kibana 9.5.7+) with Workflows feature enabled (Via Advanced Settings)
 - User with appropriate permissions:
 
 <img width="575" height="560" alt="image" src="https://github.com/user-attachments/assets/c4ed0461-3b39-453e-8d0b-19464e329d4b" />

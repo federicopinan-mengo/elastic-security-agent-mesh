@@ -43,11 +43,15 @@ Use `workflow.execute` for synchronous child composition and `workflow.executeAs
 
 #### Step maturity matrix
 
-The step-type index tags the following steps as Preview. Treat each as high-risk and pin its behavior on every upgrade:
+The step-type index tags the following steps as Preview. Treat each as high-risk and pin its behavior on every upgrade. Everything not listed here is generally available, but maturity changes between minor releases — re-check it whenever the stack version changes.
 
 | Step | Status |
 | --- | --- |
-| `waitForApproval`, `waitForInput` | Serverless Preview, Stack Preview (9.5+) |
+| `elasticsearch.request`, `elasticsearch.search`, `elasticsearch.index`, `kibana.request` | Generally available since 9.4 (Preview in 9.3) |
+| `security.setAlertStatus`, `security.setAlertTags`, `security.assignAlert`, `security.setAttackStatus`, `security.setAttackTags`, `security.assignAttack`, `security.enableRule`, `security.disableRule` | Generally available since 9.5 |
+| `cases.*` (30 step types) | Generally available since 9.4 |
+| `waitForInput` | Generally available since 9.4 (Preview since 9.5 in Serverless) |
+| `waitForApproval` | Stack Preview (9.5+), Serverless Preview |
 | `parallel` | Stack Preview (9.5+), Serverless Preview |
 | `entityStore.updateAssetCriticality` | Stack Preview (9.5+), Serverless Preview |
 | `workflow.execute`, `workflow.executeAsync`, `workflow.fail`, `workflow.output` | Tech preview |
@@ -63,13 +67,13 @@ The step-type index lists these as deprecated. Replace them in any workflow that
 
 #### Connector steps
 
-Every configured Kibana connector exposes one or more `<connector>.<action>` step types (`slack.postMessage`, `jira.createIssue`, `pagerduty.triggerIncident`, `virustotal.scanFileHash`, ...). Connector steps are typed actions, not generic HTTP — prefer them over `kibana.request` whenever the action matches.
+Every configured Kibana connector exposes one or more `<connector>.<action>` step types (`slack.postMessage`, `jira.createIssue`, `pagerduty.triggerIncident`, ...). Connector steps are typed actions, not generic HTTP — prefer them over `kibana.request` whenever the action matches. This stack ships no VirusTotal or AbuseIPDB connector, so third-party enrichment runs through the repository's own HTTP connectors (`oputils-virustotal`, `oputils-abuseipdb`) with the credential held as a connector secret, never in the workflow YAML.
 
 #### Workflows ↔ Cases ↔ Alerts
 
 The practical bridge for an incident response mesh is:
 
-1. `security.setAlertStatus` (or `kibana.SetAlertsStatus`) to acknowledge and triage an alert.
+1. `security.setAlertStatus` (generally available since 9.5; `kibana.SetAlertsStatus` is the older path) to acknowledge and triage an alert.
 2. `cases.createCase` to open a case, then `cases.addAlerts` to attach the triggering alert(s).
 3. Optional `cases.pushCases` to deliver to an external connector (SIEM, ticketing).
 4. `cases.updateCase` and `cases.addComment` as the investigation progresses.
@@ -111,6 +115,38 @@ For destructive or state-changing operations:
 5. Fail closed on execution failure.
 6. Read the resulting state or consume a documented successful result before reporting success.
 7. Record the approval identity, action ID, target, outcome, and execution ID.
+
+## Stack 9.5.7
+
+The mesh runs on Elastic Stack 9.5.7. Two things in that release shape the workflows in this repository.
+
+### Why 9.5.7 and not an earlier 9.5
+
+Kibana 9.5.7 fixes rules that a workflow edits with your own API key failing with `api key has been invalidated` (#300667). Every workflow here that creates or updates a detection rule (`create-detection-rule`, `update-detection-rule`, `enable-disable-rule`) uses that path, so 9.5.7 is the minimum supported version.
+
+### What 9.5 added
+
+| Capability | Status | Use in this repository |
+| --- | --- | --- |
+| `security.*` domain steps (alert status, alert tags, attack status, rule enable/disable) | Generally available since 9.5 | Used by `add-alert-tag-fp`, `add-alert-tag-tp`, `mark-alert-as-acknowledged`, `mark-alert-as-closed`, `enable-disable-rule`. |
+| `cases.*` (30 step types) | Generally available since 9.4 | The typed replacement for the remaining `/api/cases` calls (see below). |
+| Case triggers (`created`, `updated`, `status`, `attachments`, `comments`) | 9.5 | Replaces the comment polling in `approval-monitor.yaml`. |
+| Workflow version history | Generally available in 9.5 | Restores a workflow version after a bad edit. |
+| JSON Schema inputs (`$ref: '#/kibana/definitions/<id>'`) | 9.5 | Optional; the workflows here use scalar schemas. |
+| `secretQueryParams` on the HTTP connector | 9.5 | Available for providers that require the key in the query string. |
+| `connector_ids` on the Agent Builder conversation API | 9.5 | Limits which connectors a conversation may use. |
+| Agent tracing enabled by default | 9.5 | Traces are retained by default; confirm the retention policy. |
+| Cases as Data enabled by default | 9.5 | Cases analytics land in their own indices; the runtime identity needs read access to them. |
+
+### Migration left for a later increment
+
+1. The five case workflows (`createcasetool`, `get-case-details`, `update-case-status`, `add-case-comment`, `add-alert-to-case`) still call `/api/cases` through `kibana.request`. The `cases.*` steps are the typed equivalent, but their per-step output shape is not documented, so they are not converted yet.
+2. `approval-monitor.yaml` polls case comments to learn the outcome of an approval; a case trigger delivers the same event natively.
+3. The mesh keeps its own `approval-requests` index instead of `waitForApproval`, which is still Preview on the Stack.
+
+### Revalidate on every upgrade
+
+Re-read the step-type index, the maturity matrix above, and the release notes for the version you pin, then run `python -m scripts.validators.workflows` and the test suite. A step that changes status between minors is a behavior change even when the YAML still validates.
 
 ## Agent Builder
 
@@ -189,6 +225,7 @@ Use system prompts only for short, universal agent behavior. Move reusable or de
 - [ ] Approval rejection and timeout branch away from the mutation.
 - [ ] Retries apply only to transient, bounded failures.
 - [ ] Technical-preview steps are isolated and tracked for version revalidation.
+- [ ] Every step type is known to `scripts/validators/workflows.py`, including the steps nested inside control-flow bodies.
 
 ## Official sources
 
@@ -197,6 +234,7 @@ Use system prompts only for short, universal agent behavior. Move reusable or de
 - [Pass data and handle errors](https://www.elastic.co/docs/explore-analyze/workflows/authoring-techniques/pass-data-handle-errors)
 - [`waitForApproval` step](https://www.elastic.co/docs/explore-analyze/workflows/steps/wait-for-approval)
 - [`waitForInput` step](https://www.elastic.co/docs/explore-analyze/workflows/steps/wait-for-input)
+- [Kibana release notes](https://www.elastic.co/docs/release-notes/kibana)
 - [Human-in-the-loop techniques](https://www.elastic.co/docs/explore-analyze/workflows/authoring-techniques/human-in-the-loop)
 - [Event-driven triggers (incl. `workflows.failed`)](https://www.elastic.co/docs/explore-analyze/workflows/triggers/event-driven-triggers)
 - [Workflows setup and RBAC](https://www.elastic.co/docs/explore-analyze/workflows/get-started/setup)

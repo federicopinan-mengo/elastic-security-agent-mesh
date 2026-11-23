@@ -278,6 +278,11 @@ the path relative to the connector's base URL; the secret lives in the connector
 `elasticsearch.request` and `kibana.request` (Elastic Stack 9.4+) call your own stack with the credential of the
 workflow execution context. There is no API key in the YAML and no `Authorization` or `kbn-xsrf` header to write.
 
+The domain steps are preferred over the generic request steps when they cover the action: `security.setAlertStatus`
+and `security.setAlertTags` (Elastic Stack 9.5+) replace the alert calls, `security.enableRule` and
+`security.disableRule` replace the rule toggles, and the `cases.*` family (9.4+) replaces the `/api/cases` calls.
+They take the same credential from the execution context.
+
 ```yaml
 - name: search_alerts
   type: elasticsearch.request
