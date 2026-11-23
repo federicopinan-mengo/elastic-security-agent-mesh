@@ -11,9 +11,7 @@ from pathlib import Path
 
 import yaml
 
-WORKFLOW = (
-    Path(__file__).resolve().parent.parent / "workflows" / "mesh" / "dispatch-monitor.yaml"
-)
+WORKFLOW = Path(__file__).resolve().parent.parent / "workflows" / "mesh" / "dispatch-monitor.yaml"
 
 
 def load_workflow():

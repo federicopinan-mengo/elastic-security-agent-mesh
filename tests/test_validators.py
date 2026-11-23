@@ -222,13 +222,41 @@ class TestWorkflowsValidator:
         )
         assert "'inputs' must be an object or array" in errors
 
-    def test_unknown_action_type_is_allowed(self, tmp_path):
-        """Custom action types are tolerated (warning-only design)."""
+    def test_unknown_action_type_is_reported(self, tmp_path):
+        """A typo in a step type would ship a broken workflow, so it fails."""
         errors = validate(
             tmp_path,
             "name: Custom Action\nsteps:\n  - name: a\n    type: my.custom.action\n",
         )
+        assert any("unknown action type 'my.custom.action'" in error for error in errors)
+
+    def test_security_domain_steps_are_allowed(self, tmp_path):
+        errors = validate(
+            tmp_path,
+            "name: Triage\nsteps:\n  - name: a\n    type: security.setAlertStatus\n",
+        )
         assert errors == []
+
+    def test_cases_domain_steps_are_allowed(self, tmp_path):
+        errors = validate(
+            tmp_path,
+            "name: Case\nsteps:\n  - name: a\n    type: cases.addComment\n",
+        )
+        assert errors == []
+
+    def test_unknown_action_type_in_a_nested_body_is_reported(self, tmp_path):
+        errors = validate(
+            tmp_path,
+            "name: Nested\n"
+            "steps:\n"
+            "  - name: branch\n"
+            "    type: if\n"
+            "    condition: 'true'\n"
+            "    steps:\n"
+            "      - name: a\n"
+            "        type: security.setAlertTag\n",
+        )
+        assert any("unknown action type 'security.setAlertTag'" in error for error in errors)
 
     def test_object_form_inputs_are_valid(self, tmp_path):
         errors = validate(
