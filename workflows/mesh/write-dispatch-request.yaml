@@ -23,6 +23,7 @@ description: Queue an async dispatch request for a specialist agent.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - mesh
   - async-dispatch
@@ -48,10 +49,6 @@ inputs:
     description: "Priority: urgent or normal. Urgent dispatches are processed first."
     default: "normal"
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-
 steps:
 
   - name: derive_idempotency_key
@@ -62,13 +59,10 @@ steps:
   # A query avoids an unnecessary create in the normal duplicate path. The
   # deterministic _create in the else branch is still required to close races.
   - name: find_active_dispatch
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/dispatch-requests/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /dispatch-requests/_search
       body:
         size: 1
         query:
@@ -81,7 +75,7 @@ steps:
 
   - name: create_dispatch_request
     type: if
-    condition: steps.find_active_dispatch.output.data.hits.total.value > 0
+    condition: steps.find_active_dispatch.output.hits.total.value > 0
     steps:
       - name: duplicate_noop
         type: console
@@ -89,15 +83,12 @@ steps:
           message: "Active L1-to-L2 dispatch {{ steps.derive_idempotency_key.output }} already exists; status and retry_count are unchanged."
     else:
       - name: create_request
-        type: http
+        type: elasticsearch.request
         on-failure:
           continue: true
         with:
           method: PUT
-          url: "{{ consts.es_url }}/dispatch-requests/_create/{{ steps.derive_idempotency_key.output }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: /dispatch-requests/_create/{{ steps.derive_idempotency_key.output }}
           body:
             dispatch_id: "{{ steps.derive_idempotency_key.output }}"
             idempotency_key: "{{ steps.derive_idempotency_key.output }}"

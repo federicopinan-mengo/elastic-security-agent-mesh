@@ -13,6 +13,7 @@ description: Network-isolate an endpoint via Elastic Defend (Tier 2 — requires
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - utilities
   - response-actions
@@ -34,15 +35,10 @@ inputs:
 steps:
 
   - name: isolate
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/endpoint/action/isolate"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
+      path: /api/endpoint/action/isolate
       body:
         endpoint_ids:
           - "{{ inputs.endpoint_id }}"
@@ -54,6 +50,6 @@ steps:
       message: |
         Host isolation initiated.
         Endpoint: {{ inputs.endpoint_id }}
-        Action ID: {{ steps.isolate.output.data.data.id }}
+        Action ID: {{ steps.isolate.output.data.id }}
         Reason: {{ inputs.comment }}
         NOTE: This is a Tier 2 action. Ensure governance approval was obtained.

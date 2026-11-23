@@ -15,6 +15,7 @@ description: Delete a document from any Elasticsearch index by ID.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - data
   - knowledge
@@ -32,20 +33,13 @@ inputs:
     description: The document ID to delete
     required: true
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-
 steps:
 
   - name: get_document
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
     on-failure:
       continue: true
 
@@ -55,13 +49,10 @@ steps:
     steps:
 
       - name: delete_document
-        type: http
+        type: elasticsearch.request
         with:
           method: DELETE
-          url: "{{ consts.es_url }}/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
 
       - name: confirm
         type: console

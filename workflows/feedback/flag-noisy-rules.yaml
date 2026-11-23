@@ -13,6 +13,7 @@ description: Identify noisy detection rules with high alert volume or FP rates.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - feedback
   - detection-engineering
@@ -33,21 +34,16 @@ inputs:
     default: 50
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   alerts_index: ".alerts-security.alerts-default"
   kb_index: "kb-detection-rules"
 
 steps:
 
   - name: find_high_volume_rules
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -63,13 +59,10 @@ steps:
                 _count: desc
 
   - name: find_fp_heavy_rules
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -91,13 +84,10 @@ steps:
       continue: true
 
   - name: write_noisy_rules_report
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.kb_index }}/_doc"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.kb_index }}/_doc
       body:
         title: "Noisy Rules Report — {{ 'now' | date: '%Y-%m-%d' }}"
         content: |
@@ -118,8 +108,8 @@ steps:
         metadata:
           lookback_days: "{{ inputs.lookback_days }}"
           alert_threshold: "{{ inputs.alert_threshold }}"
-          high_volume_rules: "{{ steps.find_high_volume_rules.output.data.aggregations.by_rule.buckets }}"
-          fp_heavy_rules: "{{ steps.find_fp_heavy_rules.output.data.aggregations.by_rule.buckets }}"
+          high_volume_rules: "{{ steps.find_high_volume_rules.output.aggregations.by_rule.buckets }}"
+          fp_heavy_rules: "{{ steps.find_fp_heavy_rules.output.aggregations.by_rule.buckets }}"
 
   - name: confirm
     type: console

@@ -14,6 +14,7 @@ description: Check the status of a pending endpoint response action and retrieve
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - utilities
   - response-actions
@@ -34,30 +35,26 @@ inputs:
 steps:
 
   - name: get_action_status
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/api/endpoint/action/{{ inputs.action_id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
+      path: /api/endpoint/action/{{ inputs.action_id }}
 
   - name: output_status
     type: console
     with:
       message: |
         Action ID: {{ inputs.action_id }}
-        Command: {{ steps.get_action_status.output.data.data.command }}
-        Host: {{ steps.get_action_status.output.data.data.hosts[inputs.endpoint_id].name }}
-        Completed: {{ steps.get_action_status.output.data.data.isCompleted }}
-        Successful: {{ steps.get_action_status.output.data.data.wasSuccessful }}
-        Status: {{ steps.get_action_status.output.data.data.status }}
-        Exit Code: {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.shell_code }}
-        Shell: {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.shell }}
+        Command: {{ steps.get_action_status.output.data.command }}
+        Host: {{ steps.get_action_status.output.data.hosts[inputs.endpoint_id].name }}
+        Completed: {{ steps.get_action_status.output.data.isCompleted }}
+        Successful: {{ steps.get_action_status.output.data.wasSuccessful }}
+        Status: {{ steps.get_action_status.output.data.status }}
+        Exit Code: {{ steps.get_action_status.output.data.outputs[inputs.endpoint_id].content.shell_code }}
+        Shell: {{ steps.get_action_status.output.data.outputs[inputs.endpoint_id].content.shell }}
 
         === STDOUT ===
-        {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.stdout }}
+        {{ steps.get_action_status.output.data.outputs[inputs.endpoint_id].content.stdout }}
 
         === STDERR ===
-        {{ steps.get_action_status.output.data.data.outputs[inputs.endpoint_id].content.stderr }}
+        {{ steps.get_action_status.output.data.outputs[inputs.endpoint_id].content.stderr }}

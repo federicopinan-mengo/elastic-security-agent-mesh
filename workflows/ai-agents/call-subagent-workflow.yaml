@@ -3,6 +3,7 @@ description: Invoke a specialist agent via the ai.agent step type.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - ai-agents
 

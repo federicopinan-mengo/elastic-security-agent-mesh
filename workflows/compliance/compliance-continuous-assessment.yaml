@@ -25,6 +25,7 @@ description: >
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - compliance
   - scheduled
@@ -46,10 +47,6 @@ inputs:
     default: "DORA,ISO27001,NIS2,PCIDSS"
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-  kibana_url: "__KIBANA_URL__"
-  kibana_api_key: "__KIBANA_API_KEY__"
   kb_compliance_index: "kb-compliance"
   alerts_index: ".alerts-security.alerts-default"
   investigation_index: "investigation-contexts"
@@ -65,13 +62,10 @@ steps:
 
   # ── Step 2: Query active detection rules ─────────────────────────────────
   - name: query_detection_rules
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -88,13 +82,10 @@ steps:
 
   # ── Step 3: Query TP/FP alert counts ─────────────────────────────────────
   - name: query_tp_alerts
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -113,13 +104,10 @@ steps:
       continue: true
 
   - name: query_fp_alerts
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -139,13 +127,10 @@ steps:
 
   # ── Step 4: Query incident stats ─────────────────────────────────────────
   - name: query_incident_stats
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.investigation_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.investigation_index }}/_search
       body:
         size: 0
         query:
@@ -174,10 +159,10 @@ steps:
     with:
       message: |
         Evidence summary:
-        - Rules with alerts in period: {{ steps.query_detection_rules.output.data.aggregations.by_rule.buckets | size }}
-        - TP alerts (30d): {{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}
-        - FP alerts (30d): {{ steps.query_fp_alerts.output.data.aggregations.total_fp.value | default: 0 }}
-        - Cases created: {{ steps.query_incident_stats.output.data.aggregations.cases_with_id.doc_count | default: 0 }}
+        - Rules with alerts in period: {{ steps.query_detection_rules.output.aggregations.by_rule.buckets | size }}
+        - TP alerts (30d): {{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}
+        - FP alerts (30d): {{ steps.query_fp_alerts.output.aggregations.total_fp.value | default: 0 }}
+        - Cases created: {{ steps.query_incident_stats.output.aggregations.cases_with_id.doc_count | default: 0 }}
 
   # ── Step 6: Build evidence base (shared across all frameworks) ───────────
   - name: build_evidence_base
@@ -187,10 +172,10 @@ steps:
         {
           "period_start": "{{ 'now' | date: '%Y-%m-%d' | minus: inputs.interval_days }}",
           "period_end": "{{ 'now' | date: '%Y-%m-%d' }}",
-          "active_rules": {{ steps.query_detection_rules.output.data.aggregations.by_rule.buckets | size | default: 0 }},
-          "tp_alerts_30d": {{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }},
-          "fp_alerts_30d": {{ steps.query_fp_alerts.output.data.aggregations.total_fp.value | default: 0 }},
-          "cases_created": {{ steps.query_incident_stats.output.data.aggregations.cases_with_id.doc_count | default: 0 }}
+          "active_rules": {{ steps.query_detection_rules.output.aggregations.by_rule.buckets | size | default: 0 }},
+          "tp_alerts_30d": {{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }},
+          "fp_alerts_30d": {{ steps.query_fp_alerts.output.aggregations.total_fp.value | default: 0 }},
+          "cases_created": {{ steps.query_incident_stats.output.aggregations.cases_with_id.doc_count | default: 0 }}
         }
 
   # ── Step 7: Write DORA evidence (when DORA in frameworks) ────────────────
@@ -199,13 +184,10 @@ steps:
     condition: 'inputs.frameworks: "DORA"'
     steps:
       - name: write_dora_evidence
-        type: http
+        type: elasticsearch.request
         with:
           method: PUT
-          url: "{{ consts.es_url }}/{{ consts.kb_compliance_index }}/_doc/dora-{{ 'now' | date: '%Y-%m-%d' }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.kb_compliance_index }}/_doc/dora-{{ 'now' | date: '%Y-%m-%d' }}"
           body:
             title: "DORA Compliance Evidence — {{ 'now' | date: '%Y-%m-%d' }}"
             framework: "DORA"
@@ -217,9 +199,9 @@ steps:
                 control_name: "Detect anomalies"
                 status: "PARTIAL"
                 evidence:
-                  active_rules: "{{ steps.query_detection_rules.output.data.aggregations.by_rule.buckets | size | default: 0 }}"
+                  active_rules: "{{ steps.query_detection_rules.output.aggregations.by_rule.buckets | size | default: 0 }}"
                   mitre_techniques_covered: []
-                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}"
+                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}"
                   avg_response_time_hours: 0
                 gaps: "MITRE technique mapping not yet implemented — manual review required"
               - control_id: "DORA-ART-14"
@@ -237,10 +219,10 @@ steps:
                 evidence:
                   active_rules: 0
                   mitre_techniques_covered: []
-                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}"
+                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}"
                   avg_response_time_hours: 0
                 gaps: ""
-            summary: "DORA compliance evidence for {{ inputs.interval_days }} day period. TP alerts: {{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}. Cases created: {{ steps.query_incident_stats.output.data.aggregations.cases_with_id.doc_count | default: 0 }}."
+            summary: "DORA compliance evidence for {{ inputs.interval_days }} day period. TP alerts: {{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}. Cases created: {{ steps.query_incident_stats.output.aggregations.cases_with_id.doc_count | default: 0 }}."
             semantic_summary: "DORA compliance evidence showing coverage for detect anomalies, threat intelligence, and incident response controls"
             category: "compliance-evidence"
             tags:
@@ -260,13 +242,10 @@ steps:
     condition: 'inputs.frameworks: "ISO27001"'
     steps:
       - name: write_iso_evidence
-        type: http
+        type: elasticsearch.request
         with:
           method: PUT
-          url: "{{ consts.es_url }}/{{ consts.kb_compliance_index }}/_doc/iso27001-{{ 'now' | date: '%Y-%m-%d' }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.kb_compliance_index }}/_doc/iso27001-{{ 'now' | date: '%Y-%m-%d' }}"
           body:
             title: "ISO 27001 Compliance Evidence — {{ 'now' | date: '%Y-%m-%d' }}"
             framework: "ISO27001"
@@ -278,9 +257,9 @@ steps:
                 control_name: "Security incident management"
                 status: "COVERED"
                 evidence:
-                  active_rules: "{{ steps.query_detection_rules.output.data.aggregations.by_rule.buckets | size | default: 0 }}"
+                  active_rules: "{{ steps.query_detection_rules.output.aggregations.by_rule.buckets | size | default: 0 }}"
                   mitre_techniques_covered: []
-                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}"
+                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}"
                   avg_response_time_hours: 0
                 gaps: ""
               - control_id: "ISO-A.18.1.1"
@@ -292,7 +271,7 @@ steps:
                   tp_alerts_30d: 0
                   avg_response_time_hours: 0
                 gaps: "Legal compliance mapping not yet defined"
-            summary: "ISO 27001 compliance evidence. TP alerts: {{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}. FP alerts: {{ steps.query_fp_alerts.output.data.aggregations.total_fp.value | default: 0 }}."
+            summary: "ISO 27001 compliance evidence. TP alerts: {{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}. FP alerts: {{ steps.query_fp_alerts.output.aggregations.total_fp.value | default: 0 }}."
             semantic_summary: "ISO 27001 compliance evidence for security incident management and legal compliance controls"
             category: "compliance-evidence"
             tags:
@@ -312,13 +291,10 @@ steps:
     condition: 'inputs.frameworks: "NIS2"'
     steps:
       - name: write_nis2_evidence
-        type: http
+        type: elasticsearch.request
         with:
           method: PUT
-          url: "{{ consts.es_url }}/{{ consts.kb_compliance_index }}/_doc/nis2-{{ 'now' | date: '%Y-%m-%d' }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.kb_compliance_index }}/_doc/nis2-{{ 'now' | date: '%Y-%m-%d' }}"
           body:
             title: "NIS2 Compliance Evidence — {{ 'now' | date: '%Y-%m-%d' }}"
             framework: "NIS2"
@@ -330,9 +306,9 @@ steps:
                 control_name: "Risk management"
                 status: "PARTIAL"
                 evidence:
-                  active_rules: "{{ steps.query_detection_rules.output.data.aggregations.by_rule.buckets | size | default: 0 }}"
+                  active_rules: "{{ steps.query_detection_rules.output.aggregations.by_rule.buckets | size | default: 0 }}"
                   mitre_techniques_covered: []
-                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}"
+                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}"
                   avg_response_time_hours: 0
                 gaps: "Risk assessment methodology not yet integrated"
               - control_id: "NIS2-ART-23"
@@ -341,10 +317,10 @@ steps:
                 evidence:
                   active_rules: 0
                   mitre_techniques_covered: []
-                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}"
+                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}"
                   avg_response_time_hours: 0
                 gaps: ""
-            summary: "NIS2 compliance evidence. TP alerts: {{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}. Cases: {{ steps.query_incident_stats.output.data.aggregations.cases_with_id.doc_count | default: 0 }}."
+            summary: "NIS2 compliance evidence. TP alerts: {{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}. Cases: {{ steps.query_incident_stats.output.aggregations.cases_with_id.doc_count | default: 0 }}."
             semantic_summary: "NIS2 compliance evidence for risk management and incident response controls"
             category: "compliance-evidence"
             tags:
@@ -364,13 +340,10 @@ steps:
     condition: 'inputs.frameworks: "PCIDSS"'
     steps:
       - name: write_pci_evidence
-        type: http
+        type: elasticsearch.request
         with:
           method: PUT
-          url: "{{ consts.es_url }}/{{ consts.kb_compliance_index }}/_doc/pcidss-{{ 'now' | date: '%Y-%m-%d' }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.kb_compliance_index }}/_doc/pcidss-{{ 'now' | date: '%Y-%m-%d' }}"
           body:
             title: "PCI-DSS Compliance Evidence — {{ 'now' | date: '%Y-%m-%d' }}"
             framework: "PCIDSS"
@@ -382,9 +355,9 @@ steps:
                 control_name: "Audit log review"
                 status: "COVERED"
                 evidence:
-                  active_rules: "{{ steps.query_detection_rules.output.data.aggregations.by_rule.buckets | size | default: 0 }}"
+                  active_rules: "{{ steps.query_detection_rules.output.aggregations.by_rule.buckets | size | default: 0 }}"
                   mitre_techniques_covered: []
-                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}"
+                  tp_alerts_30d: "{{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}"
                   avg_response_time_hours: 0
                 gaps: ""
               - control_id: "PCI-11.1"
@@ -396,7 +369,7 @@ steps:
                   tp_alerts_30d: 0
                   avg_response_time_hours: 0
                 gaps: "Malware-specific detection rules not yet deployed"
-            summary: "PCI-DSS compliance evidence. TP alerts: {{ steps.query_tp_alerts.output.data.aggregations.total_tp.value | default: 0 }}. FP alerts: {{ steps.query_fp_alerts.output.data.aggregations.total_fp.value | default: 0 }}."
+            summary: "PCI-DSS compliance evidence. TP alerts: {{ steps.query_tp_alerts.output.aggregations.total_tp.value | default: 0 }}. FP alerts: {{ steps.query_fp_alerts.output.aggregations.total_fp.value | default: 0 }}."
             semantic_summary: "PCI-DSS compliance evidence for audit log review and malware detection requirements"
             category: "compliance-evidence"
             tags:

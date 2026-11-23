@@ -29,6 +29,7 @@ description: Polls for human responses to pending approval requests and dispatch
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - governance
   - scheduled
@@ -38,25 +39,16 @@ triggers:
     with:
       every: "2m"
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-  kibana_url: "__KIBANA_URL__"
-  kibana_api_key: "__KIBANA_API_KEY__"
-
 steps:
 
   # ── Step 1: Find all pending approval requests ──────────────────────────
   - name: find_pending
-    type: http
+    type: elasticsearch.request
     on-failure:
       continue: true
     with:
       method: POST
-      url: "{{ consts.es_url }}/approval-requests/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /approval-requests/_search
       body:
         size: 10
         query:
@@ -70,26 +62,25 @@ steps:
     on-failure:
       continue: true
     with:
-      message: "Found {{ steps.find_pending.output.data.hits.total.value | default: 0 }} pending approval requests."
+      message: "Found {{ steps.find_pending.output.hits.total.value | default: 0 }} pending approval requests."
 
   # ── Step 2: Process each pending request ────────────────────────────────
   - name: process_approvals
     type: foreach
-    foreach: "{{ steps.find_pending.output.data.hits.hits }}"
+    foreach: "{{ steps.find_pending.output.hits.hits }}"
     steps:
 
       # 2a. Fetch the SINGLE most recent comment on the case
       - name: fetch_latest_comment
-        type: http
+        type: kibana.request
         on-failure:
           continue: true
         with:
           method: GET
-          url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments/_find?sortOrder=desc&perPage=1"
-          headers:
-            Authorization: "ApiKey {{ consts.kibana_api_key }}"
-            kbn-xsrf: "true"
-            elastic-api-version: "2023-10-31"
+          path: /api/cases/{{ foreach.item._source.case_id }}/comments/_find
+          query:
+            sortOrder: desc
+            perPage: 1
 
       # 2b. Extract ONLY the comment text field — not the entire JSON response.
       - name: latest_comment_text
@@ -97,7 +88,7 @@ steps:
         on-failure:
           continue: true
         with:
-          message: "{{ steps.fetch_latest_comment.output.data.comments[0].comment | default: '' | strip }}"
+          message: "{{ steps.fetch_latest_comment.output.comments[0].comment | default: '' | strip }}"
 
       - name: log_latest_comment
         type: console
@@ -130,13 +121,10 @@ steps:
                   message: "Approval {{ foreach.item._source.approval_id }} APPROVED by human. Queuing dispatch for {{ foreach.item._source.target_agent }}."
 
               - name: mark_approved
-                type: http
+                type: elasticsearch.request
                 with:
                   method: POST
-                  url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.es_api_key }}"
+                  path: /approval-requests/_update/{{ foreach.item._id }}
                   body:
                     doc:
                       status: "approved"
@@ -147,15 +135,12 @@ steps:
               # The dispatch monitor picks this up within 1 minute and handles
               # invocation, retry, and failure notification.
               - name: write_dispatch
-                type: http
+                type: elasticsearch.request
                 on-failure:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.es_url }}/dispatch-requests/_doc"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.es_api_key }}"
+                  path: /dispatch-requests/_doc
                   body:
                     dispatch_id: "apr-dispatch-{{ foreach.item._source.approval_id }}"
                     requesting_agent: "approval-monitor"
@@ -185,32 +170,24 @@ steps:
                     created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
               - name: mark_executed
-                type: http
+                type: elasticsearch.request
                 on-failure:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.es_api_key }}"
+                  path: /approval-requests/_update/{{ foreach.item._id }}
                   body:
                     doc:
                       status: "executed"
                       execution_result: "Dispatch request queued for {{ foreach.item._source.target_agent }}."
 
               - name: add_executed_comment
-                type: http
+                type: kibana.request
                 on-failure:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.kibana_api_key }}"
-                    kbn-xsrf: "true"
-                    elastic-api-version: "2023-10-31"
+                  path: /api/cases/{{ foreach.item._source.case_id }}/comments
                   body:
                     type: "user"
                     comment: |
@@ -237,13 +214,10 @@ steps:
                       message: "Approval {{ foreach.item._source.approval_id }} DENIED by human."
 
                   - name: mark_denied
-                    type: http
+                    type: elasticsearch.request
                     with:
                       method: POST
-                      url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
-                      headers:
-                        Content-Type: application/json
-                        Authorization: "ApiKey {{ consts.es_api_key }}"
+                      path: /approval-requests/_update/{{ foreach.item._id }}
                       body:
                         doc:
                           status: "rejected"
@@ -251,17 +225,12 @@ steps:
                           resolved_by: "human"
 
                   - name: add_denied_comment
-                    type: http
+                    type: kibana.request
                     on-failure:
                       continue: true
                     with:
                       method: POST
-                      url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments"
-                      headers:
-                        Content-Type: application/json
-                        Authorization: "ApiKey {{ consts.kibana_api_key }}"
-                        kbn-xsrf: "true"
-                        elastic-api-version: "2023-10-31"
+                      path: /api/cases/{{ foreach.item._source.case_id }}/comments
                       body:
                         type: "user"
                         comment: |

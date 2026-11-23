@@ -1,7 +1,7 @@
 name: Record L1 Investigation Result
 description: Persist a validated L1 result without dispatching another agent.
 enabled: true
-tags: [agent-mesh, investigation]
+tags: [agent-mesh, investigation, oputils-mesh]
 triggers:
   - type: manual
 inputs:
@@ -14,27 +14,20 @@ inputs:
   - {name: escalation_reason, type: string, required: false}
   - {name: escalation_requested_at, type: string, required: false}
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   index_name: investigation-contexts
   source_agent: security-mesh.l1-triage-analyst
   target_agent: security-mesh.l2-investigation-analyst
 steps:
   - name: load_context
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ consts.index_name }}/_doc/{{ inputs.document_id }}"
-      headers:
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.index_name }}/_doc/{{ inputs.document_id }}"
   - name: record_l1_result
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.index_name }}/_update/{{ inputs.document_id }}"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.index_name }}/_update/{{ inputs.document_id }}"
       body:
         script:
           source: |
@@ -52,7 +45,8 @@ steps:
             ctx._source.l1_result = ['schema_version': '1', 'investigation_id': params.investigation_id, 'decision': params.decision, 'summary': params.summary, 'evidence_refs': params.evidence_refs, 'observed_at': params.observed_at, 'recorded_at': params.recorded_at, 'source_agent': params.source_agent, 'target_agent': params.stored_target_agent, 'escalation': escalation];
             ctx._source.updated_at = params.recorded_at;
           params:
-            investigation_id: "{{ steps.load_context.output.data._source.investigation_id }}"
+            investigation_id: >-
+              {{ steps.load_context.output._source.investigation_id }}
             decision: "{{ inputs.decision }}"
             summary: "{{ inputs.summary }}"
             evidence_refs: "{{ inputs.evidence_refs | default: '[]' }}"

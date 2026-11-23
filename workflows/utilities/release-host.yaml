@@ -7,10 +7,12 @@
 # Author: Security Agent Mesh
 # =============================================================================
 name: Release Host
-description: Release a previously isolated endpoint, restoring network connectivity.
+description: >
+  Release a previously isolated endpoint, restoring network connectivity.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - utilities
   - response-actions
@@ -32,15 +34,12 @@ inputs:
 steps:
 
   - name: release
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/endpoint/action/unisolate"
+      path: /api/endpoint/action/unisolate
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
       body:
         endpoint_ids:
           - "{{ inputs.endpoint_id }}"
@@ -52,4 +51,4 @@ steps:
       message: |
         Host released from isolation.
         Endpoint: {{ inputs.endpoint_id }}
-        Action ID: {{ steps.release.output.data.data.id }}
+        Action ID: {{ steps.release.output.data.id }}

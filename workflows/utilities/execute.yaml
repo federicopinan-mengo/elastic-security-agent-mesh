@@ -16,6 +16,7 @@ description: Execute a command on an endpoint via Elastic Defend response action
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - utilities
   - response-actions
@@ -40,15 +41,12 @@ inputs:
 steps:
 
   - name: execute_action
-    type: http
+    type: kibana.request
     with:
       method: POST
-      url: "__KIBANA_URL__/api/endpoint/action/execute"
+      path: /api/endpoint/action/execute
       headers:
         Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
       body:
         endpoint_ids:
           - "{{ inputs.endpoint_id }}"
@@ -60,4 +58,6 @@ steps:
   - name: confirm
     type: console
     with:
-      message: "Execute action submitted. Action ID: {{ steps.execute_action.output.data.data.id }}"
+      message: >
+        Execute action submitted. Action ID:
+        {{ steps.execute_action.output.data.id }}

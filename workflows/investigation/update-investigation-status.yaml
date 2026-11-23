@@ -12,6 +12,7 @@ description: Update the status or assignment of an investigation context.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - investigation
 
@@ -45,8 +46,6 @@ inputs:
     required: false
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   index_name: "investigation-contexts"
 
 steps:
@@ -57,13 +56,10 @@ steps:
       message: "Updating investigation {{ inputs.document_id }}"
 
   - name: update_context
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.index_name }}/_update/{{ inputs.document_id }}"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.index_name }}/_update/{{ inputs.document_id }}"
       body:
         script:
           source: |

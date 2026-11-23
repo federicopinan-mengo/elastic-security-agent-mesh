@@ -13,6 +13,7 @@ description: Search for similar past investigations using semantic search.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - investigation
 
@@ -34,8 +35,6 @@ inputs:
     default: 5
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   index_name: "investigation-contexts"
 
 steps:
@@ -51,13 +50,10 @@ steps:
     steps:
 
       - name: filtered_search
-        type: http
+        type: elasticsearch.request
         with:
           method: POST
-          url: "{{ consts.es_url }}/{{ consts.index_name }}/_search"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.index_name }}/_search"
           body:
             size: "{{ inputs.max_results }}"
             query:
@@ -74,13 +70,10 @@ steps:
     else:
 
       - name: unfiltered_search
-        type: http
+        type: elasticsearch.request
         with:
           method: POST
-          url: "{{ consts.es_url }}/{{ consts.index_name }}/_search"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ consts.index_name }}/_search"
           body:
             size: "{{ inputs.max_results }}"
             query:
@@ -96,7 +89,7 @@ steps:
     with:
       message: |
         {% if inputs.status_filter %}
-        Found {{ steps.filtered_search.output.data.hits.total.value }} similar investigations (filtered by {{ inputs.status_filter }})
+        Found {{ steps.filtered_search.output.hits.total.value }} similar investigations (filtered by {{ inputs.status_filter }})
         {% else %}
-        Found {{ steps.unfiltered_search.output.data.hits.total.value }} similar investigations
+        Found {{ steps.unfiltered_search.output.hits.total.value }} similar investigations
         {% endif %}

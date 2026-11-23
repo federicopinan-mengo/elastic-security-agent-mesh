@@ -13,6 +13,7 @@ description: Create a new investigation context for multi-agent collaboration.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - investigation
 
@@ -60,13 +61,10 @@ steps:
       message: "{{ 'now' | date: '%s%N' }}"
 
   - name: create_context
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "__ES_URL__/{{ consts.index_name }}/_doc"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __ES_API_KEY__"
+      path: "/{{ consts.index_name }}/_doc"
       body:
         investigation_id: "inv-{{ steps.generate_id.output }}"
         title: "{{ inputs.title }}"
@@ -88,4 +86,6 @@ steps:
   - name: confirm
     type: console
     with:
-      message: "Investigation created: {{ inputs.title }} (doc ID: {{ steps.create_context.output.data._id }})"
+      message: >
+        Investigation created: {{ inputs.title }}
+        (doc ID: {{ steps.create_context.output._id }})

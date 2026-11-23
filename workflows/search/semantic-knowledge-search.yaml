@@ -19,6 +19,7 @@ name: Semantic Knowledge Search
 description: Search for similar knowledge using semantic search with optional namespace and type filters
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - search
 
@@ -51,10 +52,6 @@ inputs:
     type: string
     description: Optional filter (e.g., 'security_use_case', 'field_group', 'detection_pattern')
     required: false
-
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
 
 triggers:
   - type: manual
@@ -92,13 +89,10 @@ steps:
           message: "{{ steps.branch_filtered.steps.prepare_filters.output | json_parse }}"
 
       - name: filtered_search
-        type: http
+        type: elasticsearch.request
         with:
           method: POST
-          url: "{{ consts.es_url }}/{{ inputs.index_name }}/_search"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ inputs.index_name }}/_search"
           body:
             size: 5
             query:
@@ -113,19 +107,16 @@ steps:
       - name: filtered_output
         type: console
         with:
-          message: "{{ steps.branch_filtered.steps.filtered_search.output.data.hits }}"
+          message: "{{ steps.branch_filtered.steps.filtered_search.output.hits }}"
 
     # --- Branch: no filters (common case) ---
     else:
 
       - name: simple_search
-        type: http
+        type: elasticsearch.request
         with:
           method: POST
-          url: "{{ consts.es_url }}/{{ inputs.index_name }}/_search"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: "/{{ inputs.index_name }}/_search"
           body:
             size: 5
             query:
@@ -136,4 +127,4 @@ steps:
       - name: simple_output
         type: console
         with:
-          message: "{{ steps.branch_filtered.steps.simple_search.output.data.hits }}"
+          message: "{{ steps.branch_filtered.steps.simple_search.output.hits }}"
