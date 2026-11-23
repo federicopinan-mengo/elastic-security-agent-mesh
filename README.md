@@ -4,7 +4,7 @@
 
 A multi-agent SOC built on Elastic. Specialist AI agents for detection engineering, threat intelligence, triage, forensics, compliance, and SOC operations, connected through a semantic registry and governed by risk-tiered controls.
 
-Requires Elastic 9.3+ with Agent Builder and Workflows enabled.
+Requires Elastic 9.4+ with Agent Builder and Workflows enabled. The workflows call Elasticsearch and Kibana through the native `elasticsearch.request` and `kibana.request` steps, which are generally available from 9.4.
 
 ---
 
@@ -42,7 +42,7 @@ See [ROADMAP.md](./ROADMAP.md) for delivery status.
 
 Complete these steps in the Kibana UI before running the setup script:
 
-1. **Elastic Cloud deployment** with Kibana 9.3+ and Workflows enabled (via Advanced Settings)
+1. **Elastic Cloud deployment** with Kibana 9.4+ and Workflows enabled (via Advanced Settings)
 
 2. **Deploy the embedding model** — `multilingual-e5-small`
    - Navigate to Machine Learning > Trained Models

@@ -249,16 +249,53 @@ Steps are the building blocks of workflows. Each step performs a single action.
 
 #### HTTP (API Calls)
 
+For an API that needs no credential, use the full URL:
+
 ```yaml
 - name: call_api
   type: http
   with:
     url: "https://api.example.com/data"
     method: POST
-    headers:
-      Authorization: "Bearer {{ consts.token }}"
     body:
       query: "{{ inputs.search_term }}"
+```
+
+For an API that needs a credential, use a Kibana connector. The step references it with `connector-id` at step level and
+the path relative to the connector's base URL; the secret lives in the connector's secrets in Kibana, never in the YAML.
+
+```yaml
+- name: call_virustotal
+  type: http
+  connector-id: oputils-virustotal
+  with:
+    path: "/ip_addresses/{{ inputs.ip }}"
+    method: GET
+```
+
+#### Elasticsearch and Kibana Requests
+
+`elasticsearch.request` and `kibana.request` (Elastic Stack 9.4+) call your own stack with the credential of the
+workflow execution context. There is no API key in the YAML and no `Authorization` or `kbn-xsrf` header to write.
+
+```yaml
+- name: search_alerts
+  type: elasticsearch.request
+  with:
+    method: POST
+    path: "/{{ consts.alerts_index }}/_search"
+    body:
+      query:
+        match_all: {}
+
+- name: add_comment
+  type: kibana.request
+  with:
+    method: POST
+    path: "/api/cases/{{ inputs.case_id }}/comments"
+    body:
+      type: "user"
+      comment: "{{ inputs.comment }}"
 ```
 
 #### Elasticsearch Search
@@ -399,7 +436,7 @@ Use double curly braces for variable substitution:
 
 | Context | Description | Example |
 |---------|-------------|---------|
-| `consts` | Workflow constants | `{{ consts.api_key }}` |
+| `consts` | Workflow constants (non-secret values only) | `{{ consts.alerts_index }}` |
 | `inputs` | Runtime inputs | `{{ inputs.target_ip }}` |
 | `steps` | Step outputs | `{{ steps.search.output.hits }}` |
 | `foreach` | Loop context | `{{ foreach.item }}` |
@@ -890,12 +927,15 @@ After a step with `continue: true`, check if it succeeded:
 
 name: Alert Triage
 
-# CONSTANTS - Update these for your environment
+# CONSTANTS - Update these for your environment (non-secret values only)
 consts:
-  virustotal_api_key: "YOUR_KEY"  # Get from VirusTotal dashboard
+  alerts_index: ".alerts-security*"
+  agent_id: "soc-analyst-01"
 ```
 
 ### 3. Use Constants for Configuration
+
+`consts` centralizes non-secret configuration. It must never hold a credential.
 
 ```yaml
 # ❌ Bad - Hardcoded values scattered throughout
@@ -904,21 +944,28 @@ steps:
     type: http
     with:
       url: "https://api.virustotal.com/v3/files"
-      headers:
-        x-apikey: "abc123"
 
 # ✅ Good - Centralized configuration
 consts:
   virustotal_url: "https://api.virustotal.com/v3"
-  virustotal_key: "abc123"
 
 steps:
   - name: call_api
     type: http
     with:
       url: "{{ consts.virustotal_url }}/files"
-      headers:
-        x-apikey: "{{ consts.virustotal_key }}"
+```
+
+A credentialed API does not go through `consts` at all: use a Kibana connector and reference it with `connector-id`.
+
+```yaml
+steps:
+  - name: call_api
+    type: http
+    connector-id: oputils-virustotal
+    with:
+      path: "/files"
+      method: GET
 ```
 
 ### 4. Handle Errors Gracefully

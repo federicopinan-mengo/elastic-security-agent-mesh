@@ -1,5 +1,11 @@
 # Elastic + OpenWebUI Integration Implementation Plan
 
+> **Estado: NO IMPLEMENTADO — ningún runtime depende de esto.**
+> This document is a PLAN, not a feature. The code it describes (`.agents/skills/openwebui/**`) was written and later
+> removed from the repository; nothing in `scripts/setup.py`, `.github/workflows/`, `workflows/` or `tests/` references
+> OpenWebUI. Implementing it requires a separate, explicit decision: the plan assumes an OpenWebUI deployment and an
+> LLM connector that this repository does not provision.
+>
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Create Python tools that allow OpenWebUI to query Elastic data (Fleet, alerts, logs, observability) via natural language using ES|QL.
@@ -702,7 +708,7 @@ git commit -m "docs(openwebui): add setup instructions for OpenWebUI tools"
 
 ## Self-Review
 
-- All tasks have complete code — no placeholders
+- All tasks have complete code — no placeholders *(the code was written and then deleted from the repository; this plan is not implemented)*
 - File paths are exact
 - Each task has commit message
 - Spec coverage is complete
