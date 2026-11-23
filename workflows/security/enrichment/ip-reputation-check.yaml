@@ -166,9 +166,10 @@ steps:
       - Is Mobile: {{ steps.get_geolocation.output.data.mobile }}
 
       Threat Assessment:
-      {% if steps.check_abuseipdb.output.data.abuseConfidenceScore > 75 %}
+      {% assign abuse = steps.check_abuseipdb.output.data.data %}
+      {% if abuse.abuseConfidenceScore > 75 %}
       \u26A0\uFE0F HIGH RISK - This IP has a high abuse confidence score
-      {% elsif steps.check_abuseipdb.output.data.abuseConfidenceScore > 25 %}
+      {% elsif abuse.abuseConfidenceScore > 25 %}
       \u26A1 MEDIUM RISK - This IP has been reported for abuse
       {% else %}
       \u2713 LOW RISK - No significant abuse reports
