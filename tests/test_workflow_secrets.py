@@ -78,7 +78,9 @@ def test_no_authentication_headers():
                 if normalized in AUTH_HEADER_NAMES or SECRET_NAME_RE.search(normalized):
                     offenders.append(f"{path.relative_to(REPO_ROOT)}: header {name}")
                 if isinstance(value, str) and value.strip().lower().startswith("apikey"):
-                    offenders.append(f"{path.relative_to(REPO_ROOT)}: header {name} carries an API key")
+                    offenders.append(
+                        f"{path.relative_to(REPO_ROOT)}: header {name} carries an API key"
+                    )
     assert not offenders, "authentication headers found:\n" + "\n".join(offenders)
 
 

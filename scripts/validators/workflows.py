@@ -126,9 +126,7 @@ def _validate_steps(steps, errors, label="steps"):
         # Validate 'if' step structure
         if step.get("type") == "if":
             if "condition" not in step:
-                errors.append(
-                    f"Step '{step.get('name', i)}': 'if' step missing 'condition'"
-                )
+                errors.append(f"Step '{step.get('name', i)}': 'if' step missing 'condition'")
             if "steps" not in step:
                 errors.append(f"Step '{step.get('name', i)}': 'if' step missing 'steps'")
 
