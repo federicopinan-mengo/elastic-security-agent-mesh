@@ -35,8 +35,8 @@ jobs:
       - name: Validate Agent Registry references
         run: python -m scripts.validators.references
 
-  test-setup:
-    name: Test setup.py
+  test:
+    name: Run test suite
     runs-on: ubuntu-latest
 
     steps:
@@ -52,7 +52,7 @@ jobs:
         run: pip install pytest requests pyyaml
 
       - name: Run unit tests
-        run: pytest tests/test_setup.py -v
+        run: python -m pytest tests/ -v
 
   lint:
     name: Lint Python
