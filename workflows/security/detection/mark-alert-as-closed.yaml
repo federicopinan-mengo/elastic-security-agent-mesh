@@ -2,8 +2,8 @@
 # Workflow: Mark Alert as Closed
 # Category: security/detection
 #
-# Closes a security alert. Uses explicit HTTP auth for subagent chain
-# reliability.
+# Closes a security alert. Uses the native security.setAlertStatus step,
+# so it inherits the workflow execution context.
 #
 # Author: Security Agent Mesh
 # =============================================================================
@@ -33,16 +33,12 @@ inputs:
 steps:
 
   - name: close_alert
-    type: kibana.request
+    type: security.setAlertStatus
     with:
-      method: POST
-      path: "/api/detection_engine/signals/status"
-      headers:
-        Content-Type: application/json
-      body:
-        signal_ids:
-          - "{{ inputs.alertid }}"
-        status: closed
+      alert_ids:
+        - "{{ inputs.alertid }}"
+      status: closed
+      close_reason: "{{ inputs.reason }}"
 
   - name: confirm
     type: console

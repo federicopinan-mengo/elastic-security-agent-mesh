@@ -5,9 +5,9 @@
 # Toggles a detection rule's enabled status. Enabling is a Tier 2
 # governance action — the agent should check governance policy first.
 #
-# Uses if-branches to set the enabled field as a native YAML boolean
-# (Liquid renders everything as strings, and the API rejects string
-# values for the enabled field).
+# Branches into security.enableRule / security.disableRule, which take the
+# rule UUID and apply the state change server-side. The rule UUID is
+# resolved first because these steps take ids, not rule_id.
 #
 # Accepts either rule_id (slug) or saved object id (UUID).
 #
@@ -66,16 +66,11 @@ steps:
     condition: 'inputs.enabled: "true"'
     steps:
       - name: enable_rule
-        type: kibana.request
+        type: security.enableRule
         with:
-          method: PATCH
-          path: "/api/detection_engine/rules"
-          headers:
-            Content-Type: application/json
-          body:
-            id: "{{ steps.try_by_uuid.output.id | default:
+          ids:
+            - "{{ steps.try_by_uuid.output.id | default:
               steps.try_by_rule_id.output.id }}"
-            enabled: true
         on-failure:
           continue: true
 
@@ -85,26 +80,24 @@ steps:
     condition: 'inputs.enabled: "false"'
     steps:
       - name: disable_rule
-        type: kibana.request
+        type: security.disableRule
         with:
-          method: PATCH
-          path: "/api/detection_engine/rules"
-          headers:
-            Content-Type: application/json
-          body:
-            id: "{{ steps.try_by_uuid.output.id | default:
+          ids:
+            - "{{ steps.try_by_uuid.output.id | default:
               steps.try_by_rule_id.output.id }}"
-            enabled: false
         on-failure:
           continue: true
 
   - name: confirm
     type: console
     with:
-      message: "{% assign result = steps.branch_enable.steps.enable_rule.output
+      message: "{% assign rule = steps.try_by_uuid.output | default:
+        steps.try_by_rule_id.output %}\n\
+        {% assign changed = steps.branch_enable.steps.enable_rule.output
         | default: steps.branch_disable.steps.disable_rule.output %}\n\
         Rule {{ inputs.rule_id }}: {% if inputs.enabled == \"true\" %}ENABLED{%
         else %}DISABLED{% endif %}\n\
-        Name: {{ result.name }}\n\
-        ID: {{ result.id }}\n\
+        Name: {{ rule.name }}\n\
+        ID: {{ rule.id }}\n\
+        Updated: {{ changed.succeeded | default: 0 }} rule(s)\n\
         "

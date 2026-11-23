@@ -3,7 +3,8 @@
 # Category: security/detection
 #
 # Sets an alert status to acknowledged, indicating it is being
-# investigated. Uses explicit HTTP auth for subagent chain reliability.
+# investigated. Uses the native security.setAlertStatus step, so it
+# inherits the workflow execution context.
 #
 # Author: Security Agent Mesh
 # =============================================================================
@@ -29,16 +30,11 @@ inputs:
 steps:
 
   - name: acknowledge_alert
-    type: kibana.request
+    type: security.setAlertStatus
     with:
-      method: POST
-      path: "/api/detection_engine/signals/status"
-      headers:
-        Content-Type: application/json
-      body:
-        signal_ids:
-          - "{{ inputs.alertid }}"
-        status: acknowledged
+      alert_ids:
+        - "{{ inputs.alertid }}"
+      status: acknowledged
 
   - name: confirm
     type: console
