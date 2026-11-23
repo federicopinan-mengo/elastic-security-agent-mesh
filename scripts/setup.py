@@ -18,18 +18,13 @@ Usage:
     python scripts/setup.py --seed-policies    # Only seed action policies
     python scripts/setup.py --tools-only       # Only create tools (requires workflows already imported)
     python scripts/setup.py --agents-only      # Only create agents (requires tools already created)
-    python scripts/setup.py --delete-workflows # (see note: manual deletion required)
-    python scripts/setup.py --delete-all       # Delete agents + tools, then full re-deploy (workflows: manual)
+    python scripts/setup.py --delete-workflows # delete the workflows this repo owns (add --yes to act)
+    python scripts/setup.py --delete-all       # Delete agents + tools + workflows, then full re-deploy
     python scripts/setup.py --validate         # Validate env vars without deploying
 
-Workflow placeholder tokens (replaced at import time with env var values):
-    __ES_URL__              ← ELASTIC_CLOUD_URL
-    __ES_API_KEY__          ← ES_API_KEY
-    __KIBANA_URL__          ← KIBANA_URL
-    __KIBANA_API_KEY__      ← KIBANA_API_KEY
-    __VT_API_KEY__          ← VIRUSTOTAL_API_KEY
-    __ABUSEIPDB_API_KEY__   ← ABUSEIPDB_API_KEY
-    __LLM_CONNECTOR_ID__     ← LLM_CONNECTOR_ID
+Workflow YAML is imported verbatim without credential substitution. Credentials
+come from the Elasticsearch/Kibana execution context for native
+elasticsearch.request and kibana.request steps, or from Kibana connectors.
 """
 
 import argparse
@@ -44,19 +39,25 @@ from pathlib import Path
 try:
     import requests
 except ImportError:
-    print("ERROR: 'requests' package required. Install with: pip install requests pyyaml python-dotenv")
+    print(
+        "ERROR: 'requests' package required. Install with: pip install requests pyyaml python-dotenv"
+    )
     sys.exit(1)
 
 try:
     import yaml
 except ImportError:
-    print("ERROR: 'pyyaml' package required. Install with: pip install requests pyyaml python-dotenv")
+    print(
+        "ERROR: 'pyyaml' package required. Install with: pip install requests pyyaml python-dotenv"
+    )
     sys.exit(1)
 
 try:
     from dotenv import load_dotenv
 except ImportError:
-    print("ERROR: 'python-dotenv' package required. Install with: pip install requests pyyaml python-dotenv")
+    print(
+        "ERROR: 'python-dotenv' package required. Install with: pip install requests pyyaml python-dotenv"
+    )
     sys.exit(1)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -195,6 +196,27 @@ WORKFLOW_DIRS = [
     "workflows/utilities",
 ]
 
+MESH_TAG = "oputils-mesh"
+
+# Third-party enrichment connectors referenced by the workflows (connector-id).
+# The API key lives in Kibana (connector secret), never in the workflow YAML.
+CONNECTOR_SPECS = (
+    {
+        "id": "oputils-virustotal",
+        "name": "VirusTotal",
+        "url": "https://www.virustotal.com/api/v3",
+        "secret_header": "x-apikey",
+        "env_var": "VIRUSTOTAL_API_KEY",
+    },
+    {
+        "id": "oputils-abuseipdb",
+        "name": "AbuseIPDB",
+        "url": "https://api.abuseipdb.com/api/v2",
+        "secret_header": "Key",
+        "env_var": "ABUSEIPDB_API_KEY",
+    },
+)
+
 
 def validate_env():
     """Check that all required environment variables are set."""
@@ -232,6 +254,94 @@ def kibana_headers():
 
 def kibana_base_url():
     return os.environ["KIBANA_URL"].rstrip("/")
+
+
+def _connector_manual_hint(spec):
+    """One-line manual instruction for a connector setup.py could not create."""
+    return (
+        "create it manually in Kibana "
+        f"(Stack Management > Connectors > Create connector > HTTP, "
+        f"base url {spec['url']}, secret header {spec['secret_header']})"
+    )
+
+
+def _provision_connector(spec, base_url, headers, existing):
+    """Create or update one connector. Returns True when Kibana accepted it."""
+    key = os.environ.get(spec["env_var"], "").strip()
+    if not key:
+        print(f"  [WARN] {spec['env_var']} is not set — skipping connector '{spec['id']}'")
+        return False
+
+    body = {
+        "name": spec["name"],
+        "connector_type_id": ".http",
+        "config": {"url": spec["url"]},
+        "secrets": {"secretHeaders": {spec["secret_header"]: key}},
+    }
+    url = f"{base_url}/api/actions/connector/{spec['id']}"
+    already_there = any(
+        c.get("id") == spec["id"] or c.get("name") == spec["name"] for c in existing
+    )
+
+    try:
+        if already_there:
+            resp = requests.put(url, headers=headers, json=body, timeout=30)
+        else:
+            resp = requests.post(url, headers=headers, json=body, timeout=30)
+    except requests.RequestException as exc:
+        print(f"  [WARN] Connector '{spec['id']}' request failed ({exc})")
+        print(f"         {_connector_manual_hint(spec)}")
+        return False
+
+    if not resp.ok:
+        print(f"  [WARN] Connector '{spec['id']}' failed: HTTP {resp.status_code}")
+        print(f"         {_connector_manual_hint(spec)}")
+        return False
+
+    action = "updated" if already_there else "created"
+    print(f"  [{action}] connector {spec['id']}")
+    return True
+
+
+def ensure_connectors():
+    """Provision the third-party enrichment connectors the workflows reference.
+
+    Best-effort by design: a missing API key or a failing Kibana call only
+    warns, so a connector problem never aborts the deploy of indices,
+    workflows, tools or agents. The API key is never printed.
+    """
+    if not os.environ.get("KIBANA_URL"):
+        print("  [WARN] KIBANA_URL is not set — skipping connector provisioning")
+        return []
+
+    try:
+        base_url = kibana_base_url()
+        headers = kibana_headers()
+    except KeyError as exc:
+        print(f"  [WARN] {exc.args[0]} is not set — skipping connector provisioning")
+        return []
+
+    try:
+        listing = requests.get(f"{base_url}/api/actions/connectors", headers=headers, timeout=30)
+        if not listing.ok:
+            raise RuntimeError(f"HTTP {listing.status_code}")
+        payload = listing.json()
+    except (requests.RequestException, RuntimeError, ValueError) as exc:
+        print(f"  [WARN] Could not list Kibana connectors ({exc}); skipping connector provisioning")
+        for spec in CONNECTOR_SPECS:
+            print(f"         {spec['id']}: {_connector_manual_hint(spec)}")
+        return []
+
+    if isinstance(payload, dict):
+        payload = payload.get("data", payload.get("connectors", []))
+    existing = [c for c in payload if isinstance(c, dict)] if isinstance(payload, list) else []
+
+    ensured = []
+    for spec in CONNECTOR_SPECS:
+        if _provision_connector(spec, base_url, headers, existing):
+            ensured.append(spec["id"])
+
+    return ensured
 
 
 def index_exists(index_name):
@@ -920,7 +1030,7 @@ def seed_operational_knowledge():
 
     for doc in documents:
         url = f"{es_url}/{doc['index']}/_doc/{doc['id']}"
-        resp = requests.put(url, headers=headers, json=doc["body"])
+        resp = requests.put(url, headers=headers, json=doc["body"], timeout=30)
         if resp.status_code in (200, 201):
             result = resp.json().get("result", "unknown")
             print(f"  [OK] {doc['index']}/{doc['id']} ({result})")
@@ -928,27 +1038,6 @@ def seed_operational_knowledge():
             print(f"  [FAILED] {doc['index']}/{doc['id']}: {resp.status_code} — {resp.text[:200]}")
 
     print()
-
-
-def build_replacements():
-    """Build the token → value map for injecting secrets into workflow YAML."""
-    return {
-        "__ES_URL__": os.environ.get("ELASTIC_CLOUD_URL", "").strip(),
-        "__ES_API_KEY__": os.environ.get("ES_API_KEY", "").strip(),
-        "__KIBANA_URL__": os.environ.get("KIBANA_URL", "").strip(),
-        "__KIBANA_API_KEY__": os.environ.get("KIBANA_API_KEY", "").strip(),
-        "__VT_API_KEY__": os.environ.get("VIRUSTOTAL_API_KEY", "").strip(),
-        "__ABUSEIPDB_API_KEY__": os.environ.get("ABUSEIPDB_API_KEY", "").strip(),
-        "__LLM_CONNECTOR_ID__": os.environ.get("LLM_CONNECTOR_ID", "").strip(),
-    }
-
-
-def apply_replacements(yaml_content, replacements):
-    """Replace placeholder tokens in YAML content with real values."""
-    for placeholder, value in replacements.items():
-        if value:
-            yaml_content = yaml_content.replace(placeholder, value)
-    return yaml_content
 
 
 def _get_deployed_workflow_names():
@@ -965,97 +1054,145 @@ def _get_deployed_workflow_names():
         if not dir_path.exists():
             continue
         for yaml_file in sorted(dir_path.glob("*.yaml")):
-            with open(yaml_file) as f:
-                for line in f:
-                    m = re.match(r"^name:\s*(.+)", line)
-                    if m:
-                        names.add(m.group(1).strip().strip('"').strip("'"))
-                        break
+            try:
+                text = yaml_file.read_text()
+            except OSError as exc:
+                print(f"  [WARN] Could not read {yaml_file}: {exc}")
+                continue
+            for line in text.splitlines():
+                m = re.match(r"^name:\s*(.+)", line)
+                if m:
+                    names.add(m.group(1).strip().strip('"').strip("'"))
+                    break
     return names
 
 
-def delete_workflows():
-    """Delete only mesh-deployed workflows from Kibana.
+def list_deployed_workflows():
+    """List the workflows currently deployed in Kibana.
 
-    Builds the expected workflow name set from repo YAML files, then
-    deletes only matching workflows — leaving other workflows untouched.
-    Handles pagination by repeating the list+delete cycle until no
-    matching workflows remain.
+    The endpoint answers with either a plain list or a paginated object;
+    both shapes are normalized to a list of workflow dicts.
+    """
+    base_url = kibana_base_url()
+    headers = kibana_headers()
+    try:
+        resp = requests.get(f"{base_url}/api/workflows", headers=headers, timeout=30)
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Could not list workflows: {exc}") from exc
+    if not resp.ok:
+        raise RuntimeError(f"Could not list workflows: HTTP {resp.status_code}")
+    payload = resp.json()
+    if isinstance(payload, dict):
+        payload = payload.get("data", payload.get("items", []))
+    return payload if isinstance(payload, list) else []
+
+
+def workflow_tags(workflow):
+    """Tags of a workflow as a list of strings."""
+    out = []
+    for tag in workflow.get("tags") or []:
+        if isinstance(tag, str):
+            out.append(tag)
+        elif isinstance(tag, dict) and tag.get("name"):
+            out.append(tag["name"])
+    return out
+
+
+def is_mesh_workflow(workflow):
+    """True when the workflow belongs to this repo (carries the mesh tag)."""
+    return MESH_TAG in workflow_tags(workflow)
+
+
+def manifest_path():
+    """Path of the deployed-workflow manifest (name → id)."""
+    return REPO_ROOT / ".oputils" / "workflows-manifest.json"
+
+
+def load_manifest():
+    """Read the manifest of previously deployed workflows."""
+    path = manifest_path()
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        print(f"  [WARN] Manifest {path} is not valid JSON; treating it as empty")
+        return {}
+    except OSError as exc:
+        print(f"  [WARN] Could not read the manifest {path}: {exc}")
+        return {}
+
+
+def save_manifest(entries):
+    """Write the manifest of deployed workflows (atomic replace)."""
+    path = manifest_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(entries, indent=2, sort_keys=True) + "\n")
+        tmp.replace(path)
+    except OSError as exc:
+        print(f"  [WARN] Could not write the manifest {path}: {exc}")
+
+
+def delete_workflows(yes=False):
+    """Delete the workflows this repo owns (tagged `oputils-mesh`).
+
+    Dry-run by default: it lists what would be deleted and changes nothing.
+    Pass yes=True (CLI: `--yes`) to actually delete. Workflows without the
+    mesh tag are never touched.
     """
     print("=== Deleting Mesh Workflows ===\n")
-
-    our_names = _get_deployed_workflow_names()
-    print(f"  Found {len(our_names)} workflow names in repo\n")
 
     base_url = kibana_base_url()
     headers = kibana_headers()
 
-    total_deleted = 0
-    total_skipped = 0
-    total_errors = 0
+    workflows = list_deployed_workflows()
+    targets = [wf for wf in workflows if is_mesh_workflow(wf)]
+    untagged = len(workflows) - len(targets)
 
-    while True:
-        resp = requests.get(
-            f"{base_url}/api/workflows",
+    if not targets:
+        print(f"  No workflows tagged '{MESH_TAG}' found; nothing to delete.\n")
+        return 0
+
+    if not yes:
+        print(f"  DRY RUN — {len(targets)} workflow(s) tagged '{MESH_TAG}' would be deleted:")
+        for wf in targets:
+            print(f"    - {wf.get('name', '')} ({wf.get('id', '')})")
+        print(f"\n  {untagged} workflow(s) without the tag are left untouched.")
+        print("  Re-run with --yes to perform the deletion.\n")
+        return 0
+
+    deleted = 0
+    errors = 0
+    for wf in targets:
+        wf_id = wf.get("id", "")
+        name = wf.get("name", wf_id)
+        resp = requests.delete(
+            f"{base_url}/api/workflows/workflow/{wf_id}?force=true&acknowledgeAclLoss=true",
             headers=headers,
             timeout=30,
         )
+        if resp.ok or resp.status_code == 204:
+            print(f"  [deleted] {name}")
+            deleted += 1
+        else:
+            print(f"  [FAILED] {name}: {resp.status_code}")
+            errors += 1
 
-        if not resp.ok:
-            print(f"  [FAILED] Could not list workflows: {resp.status_code}")
-            print(f"  {resp.text[:300]}")
-            return
-
-        workflows = resp.json()
-        if not isinstance(workflows, list):
-            workflows = workflows.get("data", workflows.get("items", []))
-
-        if not workflows:
-            break
-
-        deleted_this_round = 0
-        for wf in workflows:
-            wf_id = wf.get("id", "")
-            wf_name = wf.get("name", wf_id)
-            if not wf_id:
-                continue
-
-            if wf_name not in our_names:
-                total_skipped += 1
-                continue
-
-            del_resp = requests.delete(
-                f"{base_url}/api/workflows/{wf_id}",
-                headers=headers,
-                timeout=15,
-            )
-            if del_resp.ok or del_resp.status_code == 204:
-                print(f"  [deleted] {wf_name}")
-                total_deleted += 1
-                deleted_this_round += 1
-            else:
-                print(f"  [FAILED] {wf_name}: {del_resp.status_code}")
-                total_errors += 1
-
-            time.sleep(0.1)
-
-        if deleted_this_round == 0:
-            break
-
-    print(
-        f"\n  Deleted {total_deleted} mesh workflows, skipped {total_skipped} other workflows ({total_errors} errors)\n"
-    )
+    print(f"\n  Deleted {deleted} mesh workflow(s), left {untagged} untagged, {errors} error(s)\n")
+    return deleted
 
 
 def import_workflows():
     """Import all workflow YAML files into Kibana.
 
     For each file the script:
-      1. Replaces placeholder tokens (__ES_URL__, __VT_API_KEY__, etc.)
-         with real values from environment variables.
-      2. POSTs the YAML in the Workflows bulk-create request envelope.
-      3. If the workflow already exists (409) it PUTs to update it instead,
-         so re-running the script always converges to the repo state.
+      1. Looks the workflow up by name among the workflows tagged
+         `oputils-mesh`; if it exists it PUTs the YAML to update it.
+      2. Otherwise it POSTs the YAML verbatim in the Workflows bulk-create
+         request envelope (and falls back to a PUT if Kibana answers 409).
+      3. Records name → id in the manifest so orphans can be detected.
 
     Returns a dict mapping workflow_name → workflow_id for use by
     create_tools().
@@ -1064,19 +1201,34 @@ def import_workflows():
 
     base_url = kibana_base_url()
     headers = kibana_headers()
-    replacements = build_replacements()
     name_to_id = {}
 
-    active_tokens = {k: ("set" if v else "NOT SET") for k, v in replacements.items()}
-    print("  Placeholder injection:")
-    for token, status in active_tokens.items():
-        print(f"    {token}: {status}")
-    print()
+    existing = {}
+    try:
+        existing = {
+            wf.get("name", ""): wf.get("id", "")
+            for wf in list_deployed_workflows()
+            if is_mesh_workflow(wf) and wf.get("id")
+        }
+    except RuntimeError as exc:
+        if isinstance(exc.__cause__, requests.ConnectionError):
+            # Kibana is unreachable, so a POST cannot succeed either — and it cannot
+            # duplicate anything. Let the per-workflow POST report the real error.
+            print(
+                f"  [WARN] Could not list deployed workflows ({exc}); "
+                "continuing without the deployed list"
+            )
+        else:
+            # Kibana answered but the deployed list is unknown: a blind POST could
+            # duplicate workflows, so abort instead.
+            print(f"  [FAILED] Could not list deployed workflows ({exc}); aborting the import")
+            raise
 
     success = 0
     updated = 0
     failed = 0
     failures = []
+    manifest = {}
 
     for workflow_dir in WORKFLOW_DIRS:
         dir_path = REPO_ROOT / workflow_dir
@@ -1089,10 +1241,49 @@ def import_workflows():
 
         print(f"  {workflow_dir}/")
         for yaml_file in yaml_files:
-            with open(yaml_file) as f:
-                yaml_content = f.read()
+            try:
+                yaml_content = yaml_file.read_text()
+            except OSError as exc:
+                print(f"    [FAILED] {yaml_file.name}: {exc}")
+                failures.append(f"{yaml_file} ({yaml_file.name}): {exc}")
+                failed += 1
+                continue
 
-            yaml_content = apply_replacements(yaml_content, replacements)
+            workflow_name = ""
+            try:
+                workflow_name = (yaml.safe_load(yaml_content) or {}).get("name", "") or ""
+            except yaml.YAMLError:
+                workflow_name = ""
+
+            wf_id = existing.get(workflow_name, "")
+            resp = None
+            if wf_id:
+                resp = requests.put(
+                    f"{base_url}/api/workflows/workflow/{wf_id}",
+                    headers=headers,
+                    json={"yaml": yaml_content},
+                    timeout=30,
+                )
+                if resp.ok:
+                    name = resp.json().get("name", workflow_name or yaml_file.stem)
+                    name_to_id[name] = wf_id
+                    manifest[name] = {"id": wf_id, "path": str(yaml_file.relative_to(REPO_ROOT))}
+                    print(f"    [updated] {name}")
+                    updated += 1
+                    time.sleep(0.3)
+                    continue
+                detail = " ".join(str(getattr(resp, "text", "")).split())[:300]
+                print(
+                    f"    [FAILED update] {yaml_file.name}: "
+                    f"{resp.status_code} - {detail or 'no response detail'}"
+                )
+                failures.append(
+                    f"{yaml_file} ({yaml_file.name}): HTTP {resp.status_code} - "
+                    f"{detail or 'no response detail'}"
+                )
+                failed += 1
+                time.sleep(0.3)
+                continue
 
             resp = requests.post(
                 f"{base_url}/api/workflows",
@@ -1110,6 +1301,10 @@ def import_workflows():
                     wf_id = workflow.get("id", "")
                     if wf_id:
                         name_to_id[name] = wf_id
+                        manifest[name] = {
+                            "id": wf_id,
+                            "path": str(yaml_file.relative_to(REPO_ROOT)),
+                        }
                     print(f"    [imported] {name}")
                     success += 1
                 for failure in response_failures:
@@ -1120,7 +1315,7 @@ def import_workflows():
                     )
                     failed += 1
             elif resp.status_code == 409:
-                wf_id = resp.json().get("id", "")
+                wf_id = resp.json().get("id", "") or existing.get(workflow_name, "")
                 if wf_id:
                     put_resp = requests.put(
                         f"{base_url}/api/workflows/workflow/{wf_id}",
@@ -1131,6 +1326,10 @@ def import_workflows():
                     if put_resp.ok:
                         name = put_resp.json().get("name", yaml_file.stem)
                         name_to_id[name] = wf_id
+                        manifest[name] = {
+                            "id": wf_id,
+                            "path": str(yaml_file.relative_to(REPO_ROOT)),
+                        }
                         print(f"    [updated] {name}")
                         updated += 1
                     else:
@@ -1145,8 +1344,10 @@ def import_workflows():
                         )
                         failed += 1
                 else:
-                    print(f"    [skip] {yaml_file.name} (exists, no id returned)")
-                    updated += 1
+                    detail = "HTTP 409 - conflict without an id"
+                    print(f"    [FAILED] {yaml_file.name}: {detail}")
+                    failures.append(f"{yaml_file} ({yaml_file.name}): {detail}")
+                    failed += 1
             else:
                 detail = " ".join(str(getattr(resp, "text", "")).split())[:300]
                 print(
@@ -1161,8 +1362,31 @@ def import_workflows():
 
             time.sleep(0.3)
 
+    previous_manifest = load_manifest()
+    save_manifest(manifest)
+
+    deployed = {}
+    try:
+        deployed = {
+            wf.get("name", ""): wf.get("id", "")
+            for wf in list_deployed_workflows()
+            if is_mesh_workflow(wf)
+        }
+    except RuntimeError as exc:
+        print(f"  [WARN] Could not list deployed workflows ({exc}); skipping orphan report")
+    untracked = sorted(set(deployed) - set(manifest))
+    stale = sorted(name for name in previous_manifest if name not in deployed)
+    missing = sorted(set(_get_deployed_workflow_names()) - set(deployed))
+    if untracked:
+        print(f"  [ORPHANS] deployed but not in the manifest: {', '.join(untracked)}")
+    if stale:
+        print(f"  [STALE] in the manifest but not deployed: {', '.join(stale)}")
+    if missing:
+        print(f"  [MISSING] in the repo but not deployed: {', '.join(missing)}")
+
     print(f"\n  Total: {success} imported, {updated} updated, {failed} failed")
     print(f"  Captured {len(name_to_id)} workflow name→ID mappings\n")
+    print(f"  Manifest: {manifest_path()}\n")
     if failures:
         raise RuntimeError("Workflow imports failed:\n  - " + "\n  - ".join(failures))
     return name_to_id
@@ -1221,8 +1445,11 @@ def load_agent_definitions():
     defs_dir = REPO_ROOT / "agents" / "definitions"
     definitions = []
     for yaml_file in sorted(defs_dir.glob("*.yaml")):
-        with open(yaml_file) as f:
-            agent_def = yaml.safe_load(f)
+        try:
+            agent_def = yaml.safe_load(yaml_file.read_text())
+        except (OSError, yaml.YAMLError) as exc:
+            print(f"  [WARN] Could not load {yaml_file}: {exc}")
+            continue
         if agent_def and "agent_name" in agent_def:
             definitions.append(agent_def)
     return definitions
@@ -1244,15 +1471,14 @@ def _resolve_workflow_id(tool_name, tool_def, workflow_name_to_id):
         wf_file = REPO_ROOT / wf_path
         if wf_file.exists():
             try:
-                with open(wf_file) as f:
-                    wf_yaml = yaml.safe_load(f)
+                wf_yaml = yaml.safe_load(wf_file.read_text())
                 wf_name = wf_yaml.get("name", "")
                 if wf_name:
                     wf_id = workflow_name_to_id.get(wf_name)
                     if wf_id:
                         return wf_id
-            except Exception:
-                pass
+            except (OSError, yaml.YAMLError) as exc:
+                print(f"  [WARN] Could not read workflow {wf_file}: {exc}")
 
     return None
 
@@ -1539,7 +1765,7 @@ def create_agents(tool_name_to_id):
                         builtin_tools.append(f"{tool['name']} → {builtin_id}")
                     else:
                         skipped_tools.append(
-                            f"{tool['name']} (Conector builtin no habilitado/encontrado)"
+                            f"{tool['name']} (Connector builtin not enabled/found)"
                         )
                 continue
 
@@ -1776,6 +2002,8 @@ def print_manual_steps():
     print("  2. Create LLM connector")
     print("     Stack Management > Connectors > Create connector")
     print("     (Claude Sonnet, GPT-4o, Gemini, or your preferred model)")
+    print("     Enrichment connectors oputils-virustotal and oputils-abuseipdb are")
+    print("     auto-provisioned by setup.py; create them by hand if the key is unset")
     print()
     print("  3. Seed knowledge bases (post-setup)")
     print("     Populate kb-* indices with domain-specific data by running:")
@@ -1783,6 +2011,16 @@ def print_manual_steps():
     print("     This will automatically fetch and index MITRE ATT&CK techniques,")
     print("     ECS field definitions, and existing detection rules.")
     print()
+
+
+def import_workflows_or_exit():
+    """Import the workflows, aborting the deploy if the deployed list is unknown."""
+    try:
+        return import_workflows()
+    except RuntimeError as exc:
+        print(f"\n  [ERROR] {exc}")
+        print("  Aborting: importing without knowing the deployed workflows would duplicate them.")
+        sys.exit(1)
 
 
 def main():
@@ -1819,7 +2057,12 @@ def main():
     parser.add_argument(
         "--delete-workflows",
         action="store_true",
-        help="Delete all workflows from Kibana before importing",
+        help="Delete the workflows this repo owns (tagged oputils-mesh); dry-run unless --yes",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="Confirm a destructive operation (required to actually delete workflows)",
     )
     parser.add_argument(
         "--delete-all",
@@ -1841,16 +2084,16 @@ def main():
         return
 
     if args.delete_all:
+        delete_workflows(yes=args.yes)
         delete_agents()
         delete_tools()
-        print("\n  NOTE: Workflows must be deleted manually in Kibana before re-deploying.")
-        print("  Filter by the 'agent-mesh' tag, select all, and delete.\n")
-        print("  Waiting 15s for deletions to propagate...\n")
+        print("\n  Waiting 15s for deletions to propagate...\n")
         time.sleep(15)
         create_all_indices()
         seed_action_policies()
         seed_operational_knowledge()
-        wf_map = import_workflows()
+        ensure_connectors()
+        wf_map = import_workflows_or_exit()
         tool_map = create_tools(wf_map)
         agent_map = create_agents(tool_map)
         register_agents_in_mesh(agent_map)
@@ -1862,10 +2105,7 @@ def main():
         return
 
     if args.delete_workflows:
-        print("  NOTE: Automated workflow deletion is unreliable — the API duplicates")
-        print("  instead of updating. Delete workflows manually in Kibana first:")
-        print("  Filter by 'agent-mesh' tag → select all → delete.\n")
-        print("  Then re-run with --workflows-only to re-import.\n")
+        delete_workflows(yes=args.yes)
         return
 
     if args.indices_only:
@@ -1873,7 +2113,7 @@ def main():
         return
 
     if args.workflows_only:
-        import_workflows()
+        import_workflows_or_exit()
         return
 
     if args.seed_policies:
@@ -1932,7 +2172,8 @@ def main():
     create_all_indices()
     seed_action_policies()
     seed_operational_knowledge()
-    wf_map = import_workflows()
+    ensure_connectors()
+    wf_map = import_workflows_or_exit()
     tool_map = create_tools(wf_map)
     agent_map = create_agents(tool_map)
     register_agents_in_mesh(agent_map)

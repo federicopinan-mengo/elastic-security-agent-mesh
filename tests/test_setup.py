@@ -20,9 +20,7 @@ from setup import (
     ALERT_CONTEXT_QUERY,
     AlertContextConfigurationError,
     _get_deployed_workflow_names,
-    apply_replacements,
     build_alert_context_tool,
-    build_replacements,
     import_workflows,
     load_project_env,
     main,
@@ -155,106 +153,29 @@ class TestBoundedAlertContext:
 
 
 # =============================================================================
-# Test: build_replacements
-# =============================================================================
-class TestBuildReplacements:
-    @patch.dict(
-        os.environ,
-        {
-            "ELASTIC_CLOUD_URL": "https://test.es.region.gcp.cloud.es.io",
-            "ES_API_KEY": "test-es-key",
-            "KIBANA_URL": "https://test.kb.region.gcp.cloud.es.io",
-            "KIBANA_API_KEY": "test-kibana-key",
-            "VIRUSTOTAL_API_KEY": "vt-key",
-            "ABUSEIPDB_API_KEY": "abuse-key",
-            "LLM_CONNECTOR_ID": "claude-sonnet",
-        },
-        clear=True,
-    )
-    def test_all_env_vars_replaced(self):
-        """All environment variables are captured."""
-        replacements = build_replacements()
-
-        assert replacements["__ES_URL__"] == "https://test.es.region.gcp.cloud.es.io"
-        assert replacements["__ES_API_KEY__"] == "test-es-key"
-        assert replacements["__KIBANA_URL__"] == "https://test.kb.region.gcp.cloud.es.io"
-        assert replacements["__KIBANA_API_KEY__"] == "test-kibana-key"
-        assert replacements["__VT_API_KEY__"] == "vt-key"
-        assert replacements["__ABUSEIPDB_API_KEY__"] == "abuse-key"
-        assert replacements["__LLM_CONNECTOR_ID__"] == "claude-sonnet"
-
-    @patch.dict(os.environ, {}, clear=True)
-    def test_missing_env_vars_return_empty_string(self):
-        """Missing env vars result in empty strings (not KeyError)."""
-        replacements = build_replacements()
-
-        assert replacements["__ES_URL__"] == ""
-        assert replacements["__ES_API_KEY__"] == ""
-        assert replacements["__KIBANA_API_KEY__"] == ""
-
-
-# =============================================================================
-# Test: apply_replacements
-# =============================================================================
-class TestApplyReplacements:
-    def test_replaces_single_placeholder(self):
-        """Single placeholder is replaced."""
-        yaml_content = 'url: "__ES_URL__"'
-        replacements = {"__ES_URL__": "https://test.es.io"}
-        result = apply_replacements(yaml_content, replacements)
-        assert result == 'url: "https://test.es.io"'
-
-    def test_replaces_multiple_placeholders(self):
-        """Multiple different placeholders are replaced."""
-        yaml_content = 'url: "__ES_URL__"\nkey: "__ES_API_KEY__"'
-        replacements = {
-            "__ES_URL__": "https://test.es.io",
-            "__ES_API_KEY__": "secret",
-        }
-        result = apply_replacements(yaml_content, replacements)
-        assert "https://test.es.io" in result
-        assert "secret" in result
-
-    def test_empty_value_placeholders_are_skipped(self):
-        """Placeholders with empty string values are NOT replaced (kept as-is).
-
-        This is intentional — setup.py only replaces placeholders that have
-        actual values in the environment. Empty placeholders remain in the
-        YAML so they're visible if someone forgets to set the env var.
-        """
-        yaml_content = 'url: "__ES_URL__"\nkey: "__VT_API_KEY__"'
-        replacements = {"__ES_URL__": "https://test.es.io", "__VT_API_KEY__": ""}
-        result = apply_replacements(yaml_content, replacements)
-        # __ES_URL__ was replaced
-        assert "__ES_URL__" not in result
-        assert "https://test.es.io" in result
-        # __VT_API_KEY__ was NOT replaced (empty value → skipped, remains as-is)
-        assert "__VT_API_KEY__" in result
-
-    def test_real_workflow_snippet(self):
-        """Simulates real workflow with multiple placeholders."""
-        yaml_content = """
-steps:
-  - name: api_call
-    type: http
-    with:
-      url: "__KIBANA_URL__/api/detection_engine/rules"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-"""
-        replacements = {
-            "__KIBANA_URL__": "https://test.kb.es.io",
-            "__KIBANA_API_KEY__": "test-api-key",
-        }
-        result = apply_replacements(yaml_content, replacements)
-        assert "https://test.kb.es.io" in result
-        assert "test-api-key" in result
-
-
-# =============================================================================
 # Test: import_workflows
 # =============================================================================
 class TestImportWorkflows:
+    def test_imports_yaml_verbatim_without_substitution(self, tmp_path, monkeypatch):
+        import setup
+
+        workflow_dir = tmp_path / "workflows"
+        workflow_dir.mkdir()
+        content = 'name: test\nkey: "__ES_API_KEY__"\n'
+        (workflow_dir / "test.yaml").write_text(content)
+        monkeypatch.setattr(setup, "REPO_ROOT", tmp_path)
+        monkeypatch.setattr(setup, "WORKFLOW_DIRS", ["workflows"])
+        monkeypatch.setenv("ES_API_KEY", "secret-value")
+        monkeypatch.setenv("KIBANA_URL", "https://kibana.example")
+        monkeypatch.setenv("KIBANA_API_KEY", "test-key")
+        response = MagicMock(ok=True)
+        response.json.return_value = {"created": [{"name": "test", "id": "1"}]}
+        with patch("setup.requests.post", return_value=response) as post, patch("setup.time.sleep"):
+            import_workflows()
+        assert post.call_args.kwargs["json"] == {"workflows": [{"yaml": content}]}
+        assert not hasattr(setup, "build_replacements")
+        assert not hasattr(setup, "apply_replacements")
+
     def test_partial_import_failure_attempts_all_workflows_and_raises(self, tmp_path, monkeypatch):
         workflow_dir = tmp_path / "workflows"
         workflow_dir.mkdir()
@@ -474,7 +395,7 @@ class TestDispatchRequestsMapping:
             {"terms": {"status": ["pending", "dispatched"]}},
         ]
         create = steps["create_dispatch_request"]["else"][0]["with"]
-        assert create["url"].endswith("/_create/{{ steps.derive_idempotency_key.output }}")
+        assert create["path"].endswith("/_create/{{ steps.derive_idempotency_key.output }}")
         assert create["body"]["idempotency_key"] == "{{ steps.derive_idempotency_key.output }}"
         assert create["body"]["investigation_id"] == "{{ inputs.document_id }}"
         assert create["body"]["retry_count"] == 0
