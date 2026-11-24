@@ -11,10 +11,12 @@
 #   response → writes dispatch request → dispatch monitor invokes agent
 #
 # Detection strategy:
-#   1. Fetch the single most recent case comment
-#   2. Extract its text via Liquid (not the whole JSON blob)
-#   3. If the text matches the approval request template → still pending
-#   4. Otherwise check for APPROVED / DENIED via KQL wildcard
+#   1. Fetch the 50 most recent case comments (newest first)
+#   2. Decide with Liquid over that history: the newest decision that comes
+#      after the approval request wins, and a comment that predates the
+#      request is never read as a decision
+#   3. APPROVED or DENIED decide it; an explicit "not approved" is not a
+#      decision and leaves the request pending
 #
 # Dispatch strategy:
 #   Instead of calling the agent directly (which blocks on 5+ min agent
@@ -62,7 +64,9 @@ steps:
     on-failure:
       continue: true
     with:
-      message: "Found {{ steps.find_pending.output.hits.total.value | default: 0 }} pending approval requests."
+      message: >-
+        Found {{ steps.find_pending.output.hits.total.value | default: 0 }}
+        pending approval requests.
 
   # ── Step 2: Process each pending request ────────────────────────────────
   - name: process_approvals
@@ -70,8 +74,8 @@ steps:
     foreach: "{{ steps.find_pending.output.hits.hits }}"
     steps:
 
-      # 2a. Fetch the SINGLE most recent comment on the case
-      - name: fetch_latest_comment
+      # 2a. Fetch the most recent comments on the case, newest first.
+      - name: fetch_recent_comments
         type: kibana.request
         on-failure:
           continue: true
@@ -80,39 +84,61 @@ steps:
           path: /api/cases/{{ foreach.item._source.case_id }}/comments/_find
           query:
             sortOrder: desc
-            perPage: 1
+            perPage: 50
 
-      # 2b. Extract ONLY the comment text field — not the entire JSON response.
-      - name: latest_comment_text
+      # 2b. Decide from the comment history, not from the last comment only.
+      #     The newest decision after the approval request wins, and the
+      #     request template itself is never read as a decision.
+      - name: decide_approval
         type: console
         on-failure:
           continue: true
         with:
-          message: "{{ steps.fetch_latest_comment.output.comments[0].comment | default: '' | strip }}"
+          message: |
+            {% assign comments = steps.fetch_recent_comments.output.comments %}
+            {% assign decision = 'PENDING' %}
+            {% for c in comments %}
+              {% assign text = c.comment | default: '' %}
+              {% if text contains 'Human Approval Required' %}
+                {% break %}
+              {% elsif decision == 'PENDING' %}
+                {% if text contains 'DENIED' %}
+                  {% assign decision = 'DENIED' %}
+                {% elsif text contains 'NOT APPROVED' %}
+                  {% assign decision = 'PENDING' %}
+                {% elsif text contains 'APPROVED' %}
+                  {% assign decision = 'APPROVED' %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ decision }}
 
-      - name: log_latest_comment
+      - name: log_decision
         type: console
         with:
-          message: "Latest comment on case {{ foreach.item._source.case_id }}: {{ steps.latest_comment_text.output | truncate: 80 }}"
+          message: >-
+            Approval {{ foreach.item._source.approval_id }} — decision:
+            {{ steps.decide_approval.output | strip | truncate: 40 }}
 
-      # 2c. If the latest comment IS the approval request template, no one
-      #     has responded yet.
-      - name: check_is_approval_request
+      # 2c. No decision in the comment history yet.
+      - name: check_still_pending
         type: if
-        condition: 'steps.latest_comment_text.output: *Human Approval Required*'
+        condition: 'steps.decide_approval.output: *PENDING*'
         steps:
 
           - name: log_still_pending
             type: console
             with:
-              message: "Approval {{ foreach.item._source.approval_id }} still pending — latest comment is the approval request itself."
+              message: >-
+                Approval {{ foreach.item._source.approval_id }} still pending —
+                no decision in the case comments yet.
 
         else:
 
           # ── A newer comment exists — check for human decision ───────────
           - name: check_approved
             type: if
-            condition: 'steps.latest_comment_text.output: *APPROVED*'
+            condition: 'steps.decide_approval.output: *APPROVED*'
             steps:
 
               - name: log_approval
@@ -205,7 +231,7 @@ steps:
               # ── Check for DENIED ──────────────────────────────────────────
               - name: check_denied
                 type: if
-                condition: 'steps.latest_comment_text.output: *DENIED*'
+                condition: 'steps.decide_approval.output: *DENIED*'
                 steps:
 
                   - name: log_denial
@@ -230,7 +256,8 @@ steps:
                       continue: true
                     with:
                       method: POST
-                      path: /api/cases/{{ foreach.item._source.case_id }}/comments
+                      path: >-
+                        /api/cases/{{ foreach.item._source.case_id }}/comments
                       body:
                         type: "user"
                         comment: |
@@ -247,4 +274,9 @@ steps:
                   - name: log_unrecognized
                     type: console
                     with:
-                      message: "Approval {{ foreach.item._source.approval_id }} — new comment on case but no APPROVED/DENIED keyword found. Comment: {{ steps.latest_comment_text.output | truncate: 120 }}"
+                      message: >-
+                        Approval
+                        {{ foreach.item._source.approval_id }} — comment
+                        history holds no APPROVED/DENIED keyword. Decision:
+                        {{ steps.decide_approval.output | strip
+                        | truncate: 40 }}
