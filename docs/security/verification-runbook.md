@@ -37,10 +37,11 @@ security decisions, so each row below is a gate.
 | 14 | Enrichment connector | Trigger `VT IP Report` | the connector call succeeds with the key held in Kibana, and no key appears in the workflow YAML |
 | 15 | Approval decision | Create a case, request an approval, comment `APPROVED`, then comment something unrelated | the dispatch is queued once, the later comment does not lose the decision |
 | 16 | Approval negative | Comment `NOT APPROVED` | the request stays pending, it is not treated as an approval |
-| 17 | Index bootstrap | Run the `Create Agent Registry Index` workflow against an empty stack | the index is created; against an existing index the workflow skips the creation |
+| 17 | Index bootstrap | Run the `Create Agent Registry Index` workflow against an empty stack | the index is created (the fallback of the check step); against an existing index the workflow skips the creation and says that the index already exists |
 | 18 | Rule editing on 9.5.7 | Edit a rule with a workflow that owns the rule | no `api key has been invalidated` error (the 9.5.7 fix, #300667) |
 | 19 | Force delete | Delete a workflow with `--yes` | the workflow is removed even when it is referenced, and the run log says so |
 | 20 | No credential echo | Trigger any workflow and read the run log | the `Authorization` header value never appears in the step output |
+| 21 | Document removal | Trigger `Remove Knowledge Document` with an existing id and then with a missing one | the first run reports the document as removed, the second reports it as not found and does not fail the workflow |
 
 ## Delivery plan
 

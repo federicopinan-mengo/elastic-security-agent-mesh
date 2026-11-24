@@ -156,7 +156,9 @@ semantics of every request. This phase only changes how a request is issued and 
 | T12 | S14 | Cases domain steps for the five case workflows | worker | done | pending |
 | T13 | S14 | Approval monitor decides from the comment history, not the last comment | parent | done | pending |
 | T14 | S14 | `ruff check .` clean across the repository | parent | done | pending |
-| T15 | S14 | Verification runbook for the live-stack checks and the review plan | parent | done | pending |
+| T15 | S14 | Verification runbook for the live-stack checks and the review plan | parent | done | `0c4cc84` |
+| T16 | S14 | The case comments go through `cases.addComment` | parent | done | `8aff3fe` |
+| T17 | S14 | The dead `steps.<name>.status` guard replaced by the on-failure fallback | parent | done | `dec2bd5` |
 
 ## Log
 
@@ -322,7 +324,14 @@ The user asked for the whole 9.5.7 backlog to be closed. Four units landed in th
 - `docs/security/verification-runbook.md` lists the twenty behaviours that only a live 9.5.7 stack can
   prove, with the command or UI action for each, and the review plan for the branch.
 
-Still open, and recorded in the runbook rather than guessed at: the `steps.<name>.status` semantics used
-by the index bootstrap workflows, the `ai.agent` step, the 9.5.7 rule-editing fix (#300667), the force
-delete of a workflow, the `cases.*` payloads, and whether the `Authorization` header is echoed in the
-step logs.
+- The case comments (the approval request, the approval decision and the dispatch failure alert) now go
+  through `cases.addComment` instead of the Cases REST API by hand.
+- The `steps.<name>.status` guard is gone. The Kibana source settles it: the engine exposes each step as
+  `{input, output, error}` and no per step status, so the condition could never be true. The index
+  bootstrap now creates the index in the `fallback` of the check step, which the engine runs when the
+  check fails, and the document removal deletes idempotently and reports the result of the delete.
+  `tests/test_workflow_guards.py` fails when a workflow guards a branch on a step status.
+
+Still open, and recorded in the runbook rather than guessed at: the `ai.agent` step, the 9.5.7
+rule-editing fix (#300667), the force delete of a workflow, the `cases.*` payloads, and whether the
+`Authorization` header is echoed in the step logs.

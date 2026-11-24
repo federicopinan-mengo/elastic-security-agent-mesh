@@ -123,9 +123,15 @@ before this remediation:
    `tests/test_workflow_references.py` fails when a field read twice from the
    same step is read through two different paths.
 2. The `condition: 'steps.<name>.status: "success"'` pattern used by the
-   index-creation workflows in `agents/setup/` was written for the legacy
-   `http` step. It is kept as is because `.status` is a framework-level
-   step attribute, but it was not verified against a live Kibana.
+   index-creation workflows in `agents/setup/` and by the document removal
+   was written for the legacy `http` step. The Kibana source settles it:
+   the engine exposes each step as `{input, output, error}` and no per step
+   status, so the condition never matched and the branch it guarded never
+   ran. **Fixed**: the index bootstrap creates the index in the `fallback` of
+   the check step, which the engine runs when the check fails, and the
+   document removal deletes idempotently and reports the result of the
+   delete. `tests/test_workflow_guards.py` fails when a workflow guards a
+   branch on a step status.
 
 ## Version note
 
