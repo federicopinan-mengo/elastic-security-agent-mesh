@@ -153,6 +153,10 @@ semantics of every request. This phase only changes how a request is issued and 
 | T9 | S11 | `docs/security/remediacion-auditoria.md` + final report | parent | done | docs commit |
 | T10 | S12 | Stack 9.5.7: `security.*` domain steps, strict validator, docs pinned to 9.5.7 | parent | done | `c49f737`, `5cafd5a`, docs commit |
 | T11 | S13 | Deploy authentication by API key **or** user and password (`scripts/auth.py`) | parent | done | `17559cc`, `d8ada13`, `2053e5b`, `d86a3c5`, `d0c8a7f`, `186f46b`, `cfd0bc9` |
+| T12 | S14 | Cases domain steps for the five case workflows | worker | done | pending |
+| T13 | S14 | Approval monitor decides from the comment history, not the last comment | parent | done | pending |
+| T14 | S14 | `ruff check .` clean across the repository | parent | done | pending |
+| T15 | S14 | Verification runbook for the live-stack checks and the review plan | parent | done | pending |
 
 ## Log
 
@@ -297,3 +301,28 @@ the report, and two new tests guard the class of defect rather than the single i
 `steps.<name>` reference must point to a step of the same workflow, and a field read twice from the same
 step must be read through the same path. Both tests fail on the original file and pass on the fixed one.
 
+
+L10 (2026-11-23, the "attack everything" increment)
+The user asked for the whole 9.5.7 backlog to be closed. Four units landed in this increment:
+
+- The five case workflows moved to the GA `cases.*` domain steps (`cases.createCase`, `cases.getCase`,
+  `cases.updateCase`, `cases.addComment`, `cases.addAlerts`). The contract was verified in the Kibana
+  source: every case step returns `{case: {...}}`, so the references now read `output.case.<field>`; the
+  `connector` block of the old REST body is not an accepted input and was dropped; `cases.updateCase`
+  requires the fields inside an `updates` object and the `version` string, which the case response
+  provides; `cases.addAlerts` replaced the hack of posting a fake `type: alert` comment.
+- `approval-monitor.yaml` no longer reads only the last comment. It fetches the fifty newest comments,
+  decides with Liquid over that history (the newest decision after the request wins, a comment that
+  predates the request is never a decision, and "NOT APPROVED" is not an approval), and the `if` steps
+  read that decision token. The old logic lost a decision as soon as anybody wrote an unrelated comment
+  after the approval.
+- `ruff check .` is clean for the first time: the two vendored cloud skill scripts use `datetime.UTC`,
+  and the agent validator test keeps its imports in order with an explicit `noqa` for the path
+  bootstrap.
+- `docs/security/verification-runbook.md` lists the twenty behaviours that only a live 9.5.7 stack can
+  prove, with the command or UI action for each, and the review plan for the branch.
+
+Still open, and recorded in the runbook rather than guessed at: the `steps.<name>.status` semantics used
+by the index bootstrap workflows, the `ai.agent` step, the 9.5.7 rule-editing fix (#300667), the force
+delete of a workflow, the `cases.*` payloads, and whether the `Authorization` header is echoed in the
+step logs.

@@ -134,3 +134,43 @@ The native step types used by the conversion (`elasticsearch.request`,
 Elastic Stack 9.4 and in preview in 9.3. The `security.*` domain steps are
 generally available from 9.5. The repository requires 9.5.7, because 9.5.7
 fixes rules edited by a workflow failing with `api key has been invalidated`.
+
+## Cases domain steps
+
+The five case workflows used to call the Cases REST API by hand through
+`kibana.request`, including one hack that attached an alert to a case by
+posting a comment with `type: alert`. They now use the GA `cases.*` domain
+steps, and the contract was verified in the Kibana source before the edit:
+
+| Workflow | Step |
+| --- | --- |
+| `workflows/security/response/createcasetool.yaml` | `cases.createCase` |
+| `workflows/security/response/get-case-details.yaml` | `cases.getCase` |
+| `workflows/security/response/update-case-status.yaml` | `cases.getCase` + `cases.updateCase` |
+| `workflows/security/response/add-case-comment.yaml` | `cases.addComment` |
+| `workflows/security/response/add-alert-to-case.yaml` | `cases.addAlerts` |
+
+Every case step returns `{case: {...}}`, so the references read
+`steps.<step>.output.case.<field>`; the `connector` block of the old REST body
+is not an accepted input and was dropped; `cases.updateCase` requires the
+fields inside an `updates` object, and the `version` string it takes for
+optimistic concurrency comes from the case response.
+
+## Approval monitor
+
+`workflows/governance/approval-monitor.yaml` read a single comment — the
+newest one — and looked for `APPROVED` or `DENIED` in it. Any unrelated
+comment written after the decision destroyed it, and a decision that was never
+the newest comment was never seen. It now fetches the fifty newest comments
+and decides over that history with Liquid: the newest decision that comes
+after the approval request wins, a comment that predates the request is never
+a decision, and `NOT APPROVED` is not read as an approval.
+
+## What still needs a live stack
+
+`docs/security/verification-runbook.md` lists the twenty behaviours that the
+local suite cannot prove, with the command or UI action for each: the
+`cases.*` payloads, the `security.*` steps, `ai.agent`, the `steps.<name>.status`
+semantics of the index bootstrap workflows, the force delete of a workflow, the
+9.5.7 rule-editing fix, and whether the `Authorization` header is echoed in
+the step logs.
