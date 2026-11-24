@@ -3,8 +3,8 @@
 # Category: security/response
 #
 # Creates a new Elastic Security case for tracking incidents and
-# investigations. Uses explicit HTTP auth to work reliably when invoked
-# through the agent mesh subagent chain.
+# investigations. Uses the GA Cases domain step instead of the generic
+# Kibana REST escape hatch.
 #
 # Author: Security Agent Mesh
 # =============================================================================
@@ -38,34 +38,24 @@ inputs:
 steps:
 
   - name: create_case
-    type: kibana.request
+    type: cases.createCase
     with:
-      method: POST
-      path: "/api/cases"
-      headers:
-        Content-Type: application/json
-      body:
-        title: "{{ inputs.caseTitle }}"
-        description: "{{ inputs.caseDescription }}"
-        owner: "securitySolution"
-        tags:
-          - agent-mesh
-          - auto-generated
-        severity: "{{ inputs.severity }}"
-        connector:
-          id: "none"
-          name: "none"
-          type: ".none"
-          fields: null
-        settings:
-          syncAlerts: true
+      title: "{{ inputs.caseTitle }}"
+      description: "{{ inputs.caseDescription }}"
+      owner: "securitySolution"
+      tags:
+        - agent-mesh
+        - auto-generated
+      severity: "{{ inputs.severity }}"
+      settings:
+        syncAlerts: true
 
   - name: confirm
     type: console
     with:
       message: |
         Case created successfully.
-        Case ID: {{ steps.create_case.output.id }}
-        Title: {{ steps.create_case.output.title }}
-        Severity: {{ steps.create_case.output.severity }}
-        Owner: {{ steps.create_case.output.owner }}
+        Case ID: {{ steps.create_case.output.case.id }}
+        Title: {{ steps.create_case.output.case.title }}
+        Severity: {{ steps.create_case.output.case.severity }}
+        Owner: {{ steps.create_case.output.case.owner }}

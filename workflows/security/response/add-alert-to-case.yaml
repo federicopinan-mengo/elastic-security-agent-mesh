@@ -42,20 +42,15 @@ inputs:
 steps:
 
   - name: attach_alert
-    type: kibana.request
+    type: cases.addAlerts
     with:
-      method: POST
-      path: "/api/cases/{{ inputs.case_id }}/comments"
-      headers:
-        Content-Type: application/json
-      body:
-        type: "alert"
-        alertId: "{{ inputs.alert_id }}"
-        index: ".alerts-security.alerts-default"
-        rule:
-          id: "{{ inputs.rule_id | default: 'unknown' }}"
-          name: "{{ inputs.rule_name | default: 'unknown' }}"
-        owner: "securitySolution"
+      case_id: "{{ inputs.case_id }}"
+      alerts:
+        - alertId: "{{ inputs.alert_id }}"
+          index: ".alerts-security.alerts-default"
+          rule:
+            id: "{{ inputs.rule_id | default: 'unknown' }}"
+            name: "{{ inputs.rule_name | default: 'unknown' }}"
 
   - name: confirm
     type: console

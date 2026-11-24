@@ -29,23 +29,22 @@ inputs:
 steps:
 
   - name: get_case
-    type: kibana.request
+    type: cases.getCase
     with:
-      method: GET
-      path: "/api/cases/{{ inputs.case_id }}"
+      case_id: "{{ inputs.case_id }}"
 
   - name: output_details
     type: console
     with:
       message: |
-        Case: {{ steps.get_case.output.title }}
-        ID: {{ steps.get_case.output.id }}
-        Status: {{ steps.get_case.output.status }}
-        Severity: {{ steps.get_case.output.severity }}
-        Owner: {{ steps.get_case.output.owner }}
-        Created: {{ steps.get_case.output.created_at }}
-        Updated: {{ steps.get_case.output.updated_at }}
-        Comments: {{ steps.get_case.output.totalComment }}
-        Alerts: {{ steps.get_case.output.totalAlerts }}
-        Tags: {{ steps.get_case.output.tags | join: ", " }}
-        Description: {{ steps.get_case.output.description }}
+        Case: {{ steps.get_case.output.case.title }}
+        ID: {{ steps.get_case.output.case.id }}
+        Status: {{ steps.get_case.output.case.status }}
+        Severity: {{ steps.get_case.output.case.severity }}
+        Owner: {{ steps.get_case.output.case.owner }}
+        Created: {{ steps.get_case.output.case.created_at }}
+        Updated: {{ steps.get_case.output.case.updated_at }}
+        Comments: {{ steps.get_case.output.case.totalComment }}
+        Alerts: {{ steps.get_case.output.case.totalAlerts }}
+        Tags: {{ steps.get_case.output.case.tags | join: ", " }}
+        Description: {{ steps.get_case.output.case.description }}

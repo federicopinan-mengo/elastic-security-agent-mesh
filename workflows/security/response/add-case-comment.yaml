@@ -33,16 +33,10 @@ inputs:
 steps:
 
   - name: add_comment
-    type: kibana.request
+    type: cases.addComment
     with:
-      method: POST
-      path: "/api/cases/{{ inputs.case_id }}/comments"
-      headers:
-        Content-Type: application/json
-      body:
-        type: "user"
-        comment: "{{ inputs.comment }}"
-        owner: "securitySolution"
+      case_id: "{{ inputs.case_id }}"
+      comment: "{{ inputs.comment }}"
 
   - name: confirm
     type: console
