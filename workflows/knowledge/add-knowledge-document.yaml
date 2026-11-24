@@ -17,6 +17,7 @@ description: Index a new document into any Elasticsearch index.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - data
   - knowledge
@@ -34,24 +35,18 @@ inputs:
     description: The document body to index (any valid JSON object)
     required: true
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-
 steps:
 
   - name: index_document
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ inputs.index_name }}/_doc"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ inputs.index_name }}/_doc"
       body: "{{ inputs.document }}"
 
   - name: confirm
     type: console
     with:
-      message: "Document indexed in {{ inputs.index_name }} with ID: {{ steps.index_document.output.data._id }}"
-
+      message: >-
+        Document indexed in {{ inputs.index_name }} with ID:
+        {{ steps.index_document.output._id }}

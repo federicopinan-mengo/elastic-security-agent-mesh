@@ -18,21 +18,121 @@ import yaml
 
 REQUIRED_STEP_FIELDS = {"name", "type"}
 VALID_ACTION_TYPES = {
+    # Built-ins and control flow
     "console",
-    "http",
-    "elasticsearch.search",
-    "elasticsearch.index",
-    "elasticsearch.request",
-    "kibana.request",
-    "kibana.cases",
-    "ai.agent",
     "foreach",
     "if",
+    "switch",
+    "while",
     "parallel",
     "wait",
+    "waitForInput",
+    "waitForApproval",
+    "loop.break",
+    "loop.continue",
     "action",  # generic action type
+    # Native requests: the credential comes from the execution context
+    "elasticsearch.request",
+    "elasticsearch.search",
+    "elasticsearch.index",
+    "kibana.request",
+    # Connectors (external systems)
+    "http",
+    # AI
+    "ai.agent",
+    # Elastic Security domain steps (generally available since 9.5)
+    "security.setAlertStatus",
+    "security.setAlertTags",
+    "security.assignAlert",
+    "security.setAttackStatus",
+    "security.setAttackTags",
+    "security.assignAttack",
+    "security.enableRule",
+    "security.disableRule",
+}
+# The whole cases.* catalog, documented since 9.4 (27+ steps).
+CASES_ACTION_TYPES = {
+    f"cases.{name}"
+    for name in (
+        "addAlerts",
+        "addAttachments",
+        "addComment",
+        "addEvents",
+        "addObservables",
+        "addTags",
+        "assignCase",
+        "closeCase",
+        "createCase",
+        "createCaseFromTemplate",
+        "deleteCases",
+        "deleteObservable",
+        "findCases",
+        "findSimilarCases",
+        "getAllAttachments",
+        "getCase",
+        "getCases",
+        "getCasesByAlertId",
+        "pushCases",
+        "removeTags",
+        "setCategory",
+        "setCustomField",
+        "setDescription",
+        "setSeverity",
+        "setStatus",
+        "setTitle",
+        "unassignCase",
+        "updateCase",
+        "updateCases",
+        "updateObservable",
+    )
 }
 VALID_TRIGGER_TYPES = {"manual", "scheduled", "alert"}
+
+
+def _validate_steps(steps, errors, label="steps"):
+    """Validate a list of steps, recursing into control-flow bodies."""
+    if not isinstance(steps, list):
+        errors.append(f"'{label}' must be an array")
+        return
+    if len(steps) == 0:
+        errors.append(f"'{label}' must have at least one step")
+        return
+
+    step_names = set()
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            errors.append(f"Step {i} must be a dictionary")
+            continue
+
+        # Required: name
+        if "name" not in step:
+            errors.append(f"Step {i} missing required field: 'name'")
+        else:
+            name = step["name"]
+            if not isinstance(name, str) or not name:
+                errors.append(f"Step {i}: 'name' must be a non-empty string")
+            elif name in step_names:
+                errors.append(f"Step {i}: duplicate step name '{name}'")
+            else:
+                step_names.add(name)
+
+        # Required: type
+        if "type" not in step:
+            errors.append(f"Step {i} missing required field: 'type'")
+        elif step["type"] not in VALID_ACTION_TYPES and step["type"] not in CASES_ACTION_TYPES:
+            # A typo in a step type would ship a broken workflow.
+            errors.append(f"Step {i}: unknown action type '{step['type']}'")
+
+        # Validate 'if' step structure
+        if step.get("type") == "if":
+            if "condition" not in step:
+                errors.append(f"Step '{step.get('name', i)}': 'if' step missing 'condition'")
+            if "steps" not in step:
+                errors.append(f"Step '{step.get('name', i)}': 'if' step missing 'steps'")
+
+        # Recurse into control-flow bodies (if / foreach / parallel)
+        if isinstance(step.get("steps"), list):
+            _validate_steps(step["steps"], errors, f"steps of '{step.get('name', i)}'")
 
 
 def validate_workflow_yaml(yaml_path: Path) -> list[str]:
@@ -63,45 +163,7 @@ def validate_workflow_yaml(yaml_path: Path) -> list[str]:
     if "steps" not in workflow:
         errors.append("Missing required field: 'steps'")
     else:
-        steps = workflow["steps"]
-        if not isinstance(steps, list):
-            errors.append("'steps' must be an array")
-        elif len(steps) == 0:
-            errors.append("'steps' must have at least one step")
-        else:
-            step_names = set()
-            for i, step in enumerate(steps):
-                if not isinstance(step, dict):
-                    errors.append(f"Step {i} must be a dictionary")
-                    continue
-
-                # Required: name
-                if "name" not in step:
-                    errors.append(f"Step {i} missing required field: 'name'")
-                else:
-                    name = step["name"]
-                    if not isinstance(name, str) or not name:
-                        errors.append(f"Step {i}: 'name' must be a non-empty string")
-                    elif name in step_names:
-                        errors.append(f"Step {i}: duplicate step name '{name}'")
-                    else:
-                        step_names.add(name)
-
-                # Required: type
-                if "type" not in step:
-                    errors.append(f"Step {i} missing required field: 'type'")
-                elif step["type"] not in VALID_ACTION_TYPES:
-                    # Allow custom action types but warn
-                    pass
-
-                # Validate 'if' step structure
-                if step.get("type") == "if":
-                    if "condition" not in step:
-                        errors.append(
-                            f"Step '{step.get('name', i)}': 'if' step missing 'condition'"
-                        )
-                    if "steps" not in step:
-                        errors.append(f"Step '{step.get('name', i)}': 'if' step missing 'steps'")
+        _validate_steps(workflow["steps"], errors)
 
     # --- Optional: triggers ---
     if "triggers" in workflow:

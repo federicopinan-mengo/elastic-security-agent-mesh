@@ -1,0 +1,337 @@
+# Feature: Security remediation of the Elastic agent mesh audit
+
+Correct the five audit findings in the order the user gave, keeping the deploy green.
+Phase 0 (baseline) is complete: this document is the handoff for the implementation phases.
+
+## Specs
+
+S1 — Objective and order
+> "OBJETIVO: corregir los 5 riesgos que devolvió la auditoría de seguridad, en este orden, sin romper el deploy. Aplicá las REGLAS del prompt anterior."
+
+S2 — Phase gating
+> "No avances a la fase siguiente hasta que la anterior esté con tests en verde. Reportá al final: qué cambiaste, qué tests agregaste, qué NO pudiste verificar."
+
+S3 — Phase 0 baseline
+> "FASE 0 — BASELINE (no escribir código todavía): leer y reportar el estado real de [workflows/mesh/dispatch-monitor.yaml (consts, step types, on-failure/retry), scripts/setup.py (mecanismo de import, flags, placeholders __ES_API_KEY__/__KIBANA_API_KEY__), .github/workflows/ci.yml, tests/ (qué testea qué; qué validadores y seed_*.py sin cobertura), scripts/validators_*.py y scripts/seed_*.py, y docs/superpowers/ (openwebui)]. Entregar una tabla: archivo:línea → qué hace hoy → qué hay que cambiar → riesgo."
+
+S4 — Phase 1b: native step types
+> "1b Para cada step que hoy pega la clave en un `http` contra ES o Kibana: convertilo al tipo nativo equivalente (elasticsearch.search, elasticsearch.index, elasticsearch.esql.query, kibana.cases, kibana.request). Los tipos nativos toman la credencial de la API key que Kibana guarda internamente → no hace falta tocar el YAML con ninguna clave. Si algún caso no tiene equivalente nativo, NO lo resuelvas metiendo la clave en `consts`: documentá el caso y las alternativas."
+
+S5 — Phase 1c/1d: setup.py and tags
+> "1c setup.py: eliminar el mecanismo de sustitución de placeholders (que hoy permite que la clave llegue al YAML). 1d Sumar el tag `oputils-mesh` a todos los workflows que importa el repo (para poder borrarlos después de forma segura)."
+
+S6 — Phase 1e/1f: rotation and guard test
+> "1e ROTAR las claves de ES y Kibana en Kibana (podés documentar el procedimiento, no lo ejecutes contra el cluster). 1f Test de regresión: recorrer workflows/**/*.yaml y fallar si encuentra `__ES_API_KEY__`, `__KIBANA_API_KEY__` o un valor con forma de credencial en consts/headers (heurística: prefijo de key conocida, o string 20+ alfanuméricos pegado a nombre de variable de secreto). El test tiene que correr en CI."
+
+S7 — Phase 2: idempotent deploy
+> "2a --delete-workflows de verdad: listar workflows (GET /api/workflows, paginado), filtrar por tag `oputils-mesh`, borrar (DELETE /api/workflows/workflow/{id}?force=true&acknowledgeAclLoss=true). Dry-run por default; el borrado real solo con un flag explícito (--yes). Nunca tocar workflows que no tengan el tag. 2b Import idempotente: antes de importar cada YAML, buscar por nombre+tag entre los workflows existentes: si existe, PUT /api/workflows/workflow/{id}; si no, POST /api/workflows. Nunca POST a ciegas. 2c Manifest: guardar el mapeo nombre→id de los workflows importados (ej. `.oputils/workflows-manifest.json`) para poder detectar orphans y reportarlos. 2d Test: con un cliente HTTP falso (responses/mock), dos deploys seguidos dejan 1 workflow (no 2) y el segundo deploy hizo PUT (no POST). Test del dry-run de --delete-workflows."
+
+S8 — Phase 3: CI and coverage
+> "3a .github/workflows/ci.yml: correr la suite completa (`python -m pytest tests/ -v`) con las dependencias que el repo ya usa. 3b Tests para cada scripts/seed_*.py (mínimo: idempotencia — correr dos veces no duplica documentos). 3c Tests para los validadores sin cobertura (un caso por rama de error). 3d El guard de secretos (1f) tiene que correr en CI y fallar el build si aparece una credencial en un workflow. 3e Criterio de aceptación: CI corre la suite completa, el conteo de tests sube y la cobertura no baja."
+
+S9 — Phase 4: OpenWebUI as plan only
+> "FASE 4 — OPENWEBUI (riesgo #4): tratarlo como PLAN, no como feature. ... Mover los docs de openwebui a docs/plans/ (o dejar el doc con nombre/first line explícita 'Estado: NO IMPLEMENTADO — ningún runtime depende de esto'). Verificar con grep que ni setup.py, ni ci.yml, ni ningún workflow referencie openwebui (si algo lo referencia, ese es el bug real: corregirlo). NO reescribir historia de git ni amends."
+
+S10 — Phase 5: permissions and retry alerting
+> "5a El import debe usar una API key de cuenta de servicio / rol acotado. Definí el set mínimo en un doc de operación: workflowsManagement read+create+update+delete, Cases write, lectura de los índices de alertas que usa el repo, workflowsManagement:execute. Fuera de scope: `all` de Kibana y Security `all`. Dejar escrito el residual (Kibana guarda la API key del último que guardó el workflow → editar en la UI con admin deja esa key almacenada) como riesgo operacional accepted pero documentado. 5b Retry sin alerta (dispatch-monitor.yaml:133): hoy el reintento agota los intentos y no deja rastro. Al agotar intentos debe dejar rastro — ELEGÍ UNA vía según lo que ya usa el repo (Case comment, documento en índice, o log con nivel error) y justificá en una línea por qué no las otras dos. 5c Test del on-failure: al menos un test que verifique que la definición del workflow tiene la acción de alerta en el on-failure final (no sólo la config de retry)."
+
+S11 — Phase 6: closing document
+> "FASE 6 — CIERRE: escribir docs/security/remediacion-auditoria.md con tabla: hallazgo → archivo:línea → qué cambió → cómo se verifica → qué queda abierto. Listar explícitamente como abiertos: rotación de claves (manual en Kibana), verificación server-side del step type ai.agent, contenido real de .env (solo nombres de variables), y el comportamiento de la API key almacenada por Kibana ante ediciones manuales en la UI."
+
+S12 — Stack 9.5.7 alignment
+> "Eso esta perfecto, ahora mismo estamos en la version 9.5.7 asi que podes ir a buscar el changelog del nuevo release y podes estar al dia con la solucion y stack de elastic"
+
+## Conversion contract
+
+Authoritative rules for Phase 1b. Derived from Kibana 9.4 source (`workflows_execution_engine/server/step/{elasticsearch_action_step,kibana_action_step,connector_step}.ts`,
+`server/lib/call_kibana_api.ts`, `stack_connectors/server/connector_types/http/http_connector.ts`) and the official
+step docs. Do not deviate; if a file does not fit, stop and report instead of improvising.
+
+### C1. Step types
+
+| Target of the current `http` step | New step type | `with` shape |
+|---|---|---|
+| URL contains `{{ consts.es_url }}` or `__ES_URL__` | `elasticsearch.request` | `method`, `path`, `body` (path = URL path only, relative to the ES root) |
+| URL contains `__KIBANA_URL__` or `{{ consts.kibana_url }}` | `kibana.request` | `method`, `path` (starts with `/`), optional `body`, optional `query` (object), optional `headers` (custom only) |
+| URL is a third-party host with a credential in `consts` | `http` + `connector-id` | `path` (relative to the connector base URL), `method`, `body`, optional `query`, optional non-auth `headers` |
+| URL is a third-party host without any credential | `http` (unchanged) | `url` unchanged |
+
+The `connector-id` key sits at the step top level (sibling of `with`), never inside `with`. The connector base URL lives in
+Kibana (connector config), so `with.path` is relative to it:
+
+| Connector | Base URL | Step `path` example |
+|---|---|---|
+| `oputils-virustotal` | `https://www.virustotal.com/api/v3` | `/domains/{{ inputs.domain }}` |
+| `oputils-abuseipdb` | `https://api.abuseipdb.com/api/v2` | `/check` (query: `{ipAddress: "{{ inputs.ip_address }}"}`) |
+
+`elasticsearch.request` and `kibana.request` take their credential from the workflow execution identity; never put
+`Authorization`, `kbn-xsrf`, `elastic-api-version` or any API key in them. `kibana.request` auto-adds `kbn-xsrf` and
+`Content-Type`.
+
+### C2. Path and query mapping
+
+- ES: `{{ consts.es_url }}/{{ consts.alerts_index }}/_search` → `path: /{{ consts.alerts_index }}/_search`.
+  `__ES_URL__/kb-mitre-attack/_search` → `path: /kb-mitre-attack/_search`. The ES root is implicit.
+- Kibana: `__KIBANA_URL__/api/detection_engine/rules/_find?per_page=1000&sort_field=name&sort_order=asc` →
+  `path: /api/detection_engine/rules/_find` + `query: {per_page: 1000, sort_field: name, sort_order: asc}`.
+  Query strings never stay inside `path`.
+- Kibana query values keep their templates: `?rule_id={{ inputs.rule_id }}` → `query: {rule_id: "{{ inputs.rule_id }}"}`.
+- A conditional query fragment keeps its Liquid expression inside the query value:
+  `{% if inputs.search %}&filter=alert.attributes.name:%20{{ inputs.search }}{% endif %}` →
+  `query: { filter: "{% if inputs.search %}alert.attributes.name: {{ inputs.search }}{% endif %}" }`.
+
+### C3. Output references
+
+The legacy `http` step wrapped the parsed body in `.output.data`. `elasticsearch.request` and `kibana.request` expose
+the body directly. Therefore, for every **ES or Kibana** step converted to a native type, in the whole file:
+
+    steps.<name>.output.data  →  steps.<name>.output
+
+(drop exactly one `.data`; any further `.data` belongs to the response body itself and stays).
+Examples: `steps.list_rules.output.data.total` → `steps.list_rules.output.total`;
+`steps.isolate.output.data.data.id` → `steps.isolate.output.data.id`;
+`steps.search.output.data.hits.hits` → `steps.search.output.hits.hits`.
+Steps that are not converted keep their references untouched (`ai.agent`, `console`, `http` without conversion).
+
+A step converted to `http` + `connector-id` keeps the legacy shape (the http connector result is
+`{status, statusText, headers, data}`, body at `.data`): its references are NOT rewritten.
+
+### C9. Every reference is rewritten, not only the obvious ones
+
+`steps.<name>.output.data` appears in console messages, `if` conditions, `foreach` inputs, body strings and
+`on-failure` blocks, not only in obvious assignments. Search the whole file for the step name and rewrite every
+occurrence that belongs to a converted ES/Kibana step. References to `ai.agent`, `console` or non-converted steps
+stay exactly as they are.
+
+### C4. Timeouts
+
+`timeout` is not a `with` field anymore: move it to the step top level as a duration string
+(`with: {timeout: 600}` → step-level `timeout: "600s"`; `timeout: "30s"` → step-level `timeout: "30s"`).
+This applies to every converted step, including `http` + `connector-id` (the http connector has no timeout
+parameter; the step-level timeout is the only control).
+
+### C5. Third-party credentials
+
+Third-party API keys never live in the workflow YAML. They move to a Kibana connector secret:
+
+- VirusTotal → connector `oputils-virustotal` (base URL `https://www.virustotal.com/api/v3`, secret header `x-apikey`).
+- AbuseIPDB → connector `oputils-abuseipdb` (base URL `https://api.abuseipdb.com/api/v2`, secret header `Key`).
+- `ip-api.com` needs no credential: it stays a plain `http` step with its full URL.
+
+The workflow step keeps `connector-id: <connector name>` at the step top level and drops only the auth header;
+every other header (for example `Content-Type`) stays in `with.headers`. The connector itself is provisioned by
+`scripts/setup.py` (task T3); the workflow only references it by name.
+
+### C6. Consts cleanup
+
+After conversion, `es_url`, `es_api_key`, `kibana_url`, `kibana_api_key`, `vt_api_key` and `api_key` (AbuseIPDB) are
+dead. Remove each const only if no remaining reference to it exists in the file; remove the whole `consts:` block when
+it becomes empty. Non-secret consts (index names, base URLs of keyless third parties, agent names) stay.
+
+### C7. Tags
+
+Every workflow imported by the repo gets the tag `oputils-mesh` (task T3 adds it at import time; the YAML files keep
+their own tags).
+
+### C8. What must not change
+
+Step names, step order, `if`/`foreach` control flow, `on-failure` blocks, triggers, inputs, descriptions and the
+semantics of every request. This phase only changes how a request is issued and how its output is read.
+
+## Tasks
+
+| ID | Spec | Task | Route | Status | Commit |
+|---|---|---|---|---|---|
+| T1 | S3 | Baseline audit + native step contract | parent | done | this document |
+| T2 | S4 | Convert `http` steps to native step types (57 workflow files) | worker x4 (disjoint folders) | done | `38d75df`, `bc710b2`, `a64b76c` |
+| T3 | S5 | setup.py: drop placeholder substitution, add `oputils-mesh` tag, provision third-party connectors | parent | done | `c897c84` (tag: `38d75df`, `bc710b2`, `a64b76c`) |
+| T4 | S6 | Secret guard regression test + CI wiring | parent | done | `f63a047`, `8971167` |
+| T5 | S7 | Idempotent deploy: PUT by name, real `--delete-workflows`, manifest, tests | parent | done | `c897c84` |
+| T6 | S8 | CI full suite + tests for seed_*.py and validators | worker | done | `8971167` |
+| T7 | S9 | OpenWebUI marked as plan, not implemented | parent | done | docs commit |
+| T8 | S10 | Minimal-permissions doc + retry alerting with a verifiable test | parent | done | `bc710b2` (workflow), `f63a047` (test), docs commit (least privilege) |
+| T9 | S11 | `docs/security/remediacion-auditoria.md` + final report | parent | done | docs commit |
+| T10 | S12 | Stack 9.5.7: `security.*` domain steps, strict validator, docs pinned to 9.5.7 | parent | done | `c49f737`, `5cafd5a`, docs commit |
+| T11 | S13 | Deploy authentication by API key **or** user and password (`scripts/auth.py`) | parent | done | `17559cc`, `d8ada13`, `2053e5b`, `d86a3c5`, `d0c8a7f`, `186f46b`, `cfd0bc9` |
+| T12 | S14 | Cases domain steps for the five case workflows | worker | done | pending |
+| T13 | S14 | Approval monitor decides from the comment history, not the last comment | parent | done | pending |
+| T14 | S14 | `ruff check .` clean across the repository | parent | done | pending |
+| T15 | S14 | Verification runbook for the live-stack checks and the review plan | parent | done | `0c4cc84` |
+| T16 | S14 | The case comments go through `cases.addComment` | parent | done | `8aff3fe` |
+| T17 | S14 | The dead `steps.<name>.status` guard replaced by the on-failure fallback | parent | done | `dec2bd5` |
+
+## Log
+
+L1 (2026-11-20, user, original request)
+> "OBJETIVO: corregir los 5 riesgos que devolvió la auditoría de seguridad, en este orden, sin romper el deploy. Aplicá las REGLAS del prompt anterior."
+> "FASE 0 — BASELINE (no escribir código todavía): leer y reportar el estado real de [workflows/mesh/dispatch-monitor.yaml (consts, step types, on-failure/retry), scripts/setup.py (mecanismo de import, flags, placeholders __ES_API_KEY__/__KIBANA_API_KEY__), .github/workflows/ci.yml, tests/ (qué testea qué; qué validadores y seed_*.py sin cobertura), scripts/validators_*.py y scripts/seed_*.py, y docs/superpowers/ (openwebui)]. Entregar una tabla: archivo:línea → qué hace hoy → qué hay que cambiar → riesgo. Si algo de la auditoría no coincide con lo que ves en el código, decilo: la auditoría puede estar desactualizada."
+> "FASE 1 — SECRETOS EN LOS WORKFLOWS (riesgo #1) — 1a Inventariá los YAML que usan __ES_API_KEY__/__KIBANA_API_KEY__ o que meten credenciales en consts/headers. 1b Para cada step que hoy pega la clave en un `http` contra ES o Kibana: convertilo al tipo nativo equivalente (elasticsearch.search, elasticsearch.index, elasticsearch.esql.query, kibana.cases, kibana.request). Los tipos nativos toman la credencial de la API key que Kibana guarda internamente → no hace falta tocar el YAML con ninguna clave. Si algún caso no tiene equivalente nativo, NO lo resuelvas metiendo la clave en `consts`: documentá el caso y las alternativas. 1c setup.py: eliminar el mecanismo de sustitución de placeholders (que hoy permite que la clave llegue al YAML). 1d Sumar el tag `oputils-mesh` a todos los workflows que importa el repo (para poder borrarlos después de forma segura). 1e ROTAR las claves de ES y Kibana en Kibana (podés documentar el procedimiento, no lo ejecutes contra el cluster). 1f Test de regresión: recorrer workflows/**/*.yaml y fallar si encuentra `__ES_API_KEY__`, `__KIBANA_API_KEY__` o un valor con forma de credencial en consts/headers (heurística: prefijo de key conocida, o string 20+ alfanuméricos pegado a nombre de variable de secreto). El test tiene que correr en CI."
+> "FASE 2 — DEPLOY IDEMPOTENTE (riesgo #2) — 2a --delete-workflows de verdad: listar workflows (GET /api/workflows, paginado), filtrar por tag `oputils-mesh`, borrar (DELETE /api/workflows/workflow/{id}?force=true&acknowledgeAclLoss=true). Dry-run por default; el borrado real solo con un flag explícito (--yes). Nunca tocar workflows que no tengan el tag. 2b Import idempotente: antes de importar cada YAML, buscar por nombre+tag entre los workflows existentes: si existe, PUT /api/workflows/workflow/{id}; si no, POST /api/workflows. Nunca POST a ciegas. 2c Manifest: guardar el mapeo nombre→id de los workflows importados (ej. `.oputils/workflows-manifest.json`) para poder detectar orphans y reportarlos. 2d Test: con un cliente HTTP falso (responses/mock), dos deploys seguidos dejan 1 workflow (no 2) y el segundo deploy hizo PUT (no POST). Test del dry-run de --delete-workflows."
+> "FASE 3 — CI Y COBERTURA (riesgo #3) — 3a .github/workflows/ci.yml: correr la suite completa (`python -m pytest tests/ -v`) con las dependencias que el repo ya usa. Corré la suite y arreglá lo que rompa; si algo falla y no se puede arreglar sin cambiar alcance, frená y reportá. 3b Tests para cada scripts/seed_*.py (mínimo: idempotencia — correr dos veces no duplica documentos). 3c Tests para los validadores sin cobertura (un caso por rama de error). 3d El guard de secretos (1f) tiene que correr en CI y fallar el build si aparece una credencial en un workflow. 3e Criterio de aceptación: CI corre la suite completa, el conteo de tests sube y la cobertura no baja."
+> "FASE 4 — OPENWEBUI (riesgo #4) — tratarlo como PLAN, no como feature. Mover los docs de openwebui a docs/plans/ (o dejar el doc con nombre/first line explícita 'Estado: NO IMPLEMENTADO — ningún runtime depende de esto'). Verificar con grep que ni setup.py, ni ci.yml, ni ningún workflow referencie openwebui (si algo lo referencia, ese es el bug real: corregirlo). NO reescribir historia de git ni amends. Si hay fecha comprometida, la implementación mínima entra en scope pero hay que avisar y esperar confirmación."
+> "FASE 5 — PERMISOS Y ALERTING DEL RETRY (riesgo #5) — 5a El import debe usar una API key de cuenta de servicio / rol acotado. Definí el set mínimo en un doc de operación: workflowsManagement read+create+update+delete, Cases write, lectura de los índices de alertas que usa el repo, workflowsManagement:execute. Fuera de scope: `all` de Kibana y Security `all`. Dejar escrito el residual (Kibana guarda la API key del último que guardó el workflow → editar en la UI con admin deja esa key almacenada) como riesgo operacional accepted pero documentado. 5b Retry sin alerta (dispatch-monitor.yaml:133): hoy el reintento agota los intentos y no deja rastro. Al agotar intentos debe dejar rastro — ELEGÍ UNA vía según lo que ya usa el repo (Case comment, documento en índice, o log con nivel error) y justificá en una línea por qué no las otras dos. 5c Test del on-failure: al menos un test que verifique que la definición del workflow tiene la acción de alerta en el on-failure final (no sólo la config de retry)."
+> "FASE 6 — CIERRE: escribir docs/security/remediacion-auditoria.md con tabla: hallazgo → archivo:línea → qué cambió → cómo se verifica → qué queda abierto. Listar explícitamente como abiertos: rotación de claves (manual en Kibana), verificación server-side del step type ai.agent, contenido real de .env (solo nombres de variables), y el comportamiento de la API key almacenada por Kibana ante ediciones manuales en la UI."
+> "No avances a la fase siguiente hasta que la anterior esté con tests en verde. Reportá al final: qué cambiaste, qué tests agregaste, qué NO pudiste verificar."
+
+L3 (2026-11-23, correction) — Verified against `connector_step.ts` and `http_connector.ts` in Kibana main:
+the http connector executor returns `{status, statusText, headers, data}` and the step exposes that object, so a
+step converted to `http` + `connector-id` keeps the legacy `.output.data` body shape and its references must not be
+rewritten. Only ES and Kibana native conversions drop one `.data`. Also confirmed: `connector-id` is read from the
+step top level (`step['connector-id']`), and the http connector merges `params.headers` over the connector config
+headers, so non-auth headers survive in `with.headers`.
+
+L2 (2026-11-23, decision) — Phase 1b target types: `elasticsearch.request` for Elasticsearch calls and
+`kibana.request` for Kibana REST calls, chosen over the named actions (`elasticsearch.search`, `cases.*`) because the
+named actions change the request body contract and their output shape cannot be verified offline; `kibana.request`
+keeps the REST call and its body byte-identical and only changes who attaches the credential. Third-party keys move to
+Kibana connectors (`oputils-virustotal`, `oputils-abuseipdb`) because this stack has no VirusTotal connector type and
+the HTTP connector can hold secret headers.
+
+L4 (2026-11-23, progress) — Phase 1b runs as four parallel writers with disjoint surfaces
+(`workflows/security/detection/**`; `workflows/security/enrichment/**` + `workflows/security/response/**`;
+`workflows/investigation/**` + `workflows/knowledge/**` + `workflows/mesh/**` + `workflows/utilities/**`;
+`workflows/governance/**` + `workflows/feedback/**` + `workflows/compliance/**` + `workflows/observability/**` +
+`workflows/search/**`). The golden conversion (`workflows/utilities/isolate-host.yaml`) is already applied and
+`python -m scripts.validators.workflows` is green. Phase 1c (drop the placeholder substitution from `scripts/setup.py`)
+runs in parallel on `scripts/setup.py` + `tests/test_setup.py`.
+
+The credential guard of S7 now exists as `tests/test_workflow_secrets.py` and is RED until every workflow is
+converted: it fails on any legacy placeholder (`__ES_API_KEY__`, `__KIBANA_API_KEY__`, `__VT_API_KEY__`,
+`__ABUSEIPDB_API_KEY__`, `__LLM_CONNECTOR_ID__`, `__ES_URL__`, `__KIBANA_URL__`), on any authentication header
+(`authorization`, `x-apikey`, `key`, …) and on any constant whose name looks like a secret but carries a value.
+
+Phase 4 (S9) is closed: both OpenWebUI documents carry `Estado: NO IMPLEMENTADO — ningún runtime depende de esto`,
+the false footer claim ("All tasks have complete code") is qualified, and `grep -rni openwebui` over `scripts/`,
+`.github/`, `workflows/`, `agents/` and `tests/` finds no runtime reference.
+
+The `oputils-mesh` tag (S6) is added to the 57 workflow YAMLs in one pass after the conversion lands, so
+`scripts/setup.py` imports every workflow already tagged and the delete-by-tag of Phase 2 can select them safely.
+
+L5 (2026-11-23, close) — The five phases are implemented and the suite is green (135 passed, 1 xfailed).
+Commits on `feat/security-remediation-auditoria`, in order:
+`38d75df` (security workflows), `bc710b2` (platform workflows and the dispatch retry alert),
+`a64b76c` (index bootstrap workflows), `f63a047` (secret guard and retry alert tests),
+`8971167` (CI, seed and validator tests), `c897c84` (idempotent deploy and connector provisioning),
+and the documentation commit.
+The conversion is larger than one review slice (1834 authored lines), so it was split by area and the
+workflow commits carry the transformation, the guard test and the retry test with it.
+
+An independent read-only review of the destructive deploy path found three gaps, all closed before the
+branch was finished: an unreadable workflow list no longer falls back to a blind POST, a `409` without an
+id is a reported failure instead of a silent "updated", and the manifest is read before it is written and
+is written atomically. The details are in `docs/security/remediacion-auditoria.md` (section "Verification").
+
+Open, not verifiable from the repository: the manual key rotation in Kibana, the server-side behaviour of
+the `ai.agent` step, the real content of the local environment file, and the credential Kibana keeps for the
+last user who saved a workflow.
+
+L6 (2026-11-23, stack 9.5.7) — The stack is pinned to 9.5.7 (S12). 9.5.7 is the minimum because it fixes rules
+edited by a workflow failing with `api key has been invalidated` (Kibana #300667), which is the path taken by the
+three rule workflows. What 9.5 added and what it changed here: the `security.*` domain steps are generally
+available, so the alert status, alert tag and rule enable/disable calls moved to `security.setAlertStatus`,
+`security.setAlertTags`, `security.enableRule` and `security.disableRule` (`c49f737`); the validator rejects an
+unknown step type instead of warning and recurses into the bodies of `if`, `foreach` and `parallel` steps
+(`5cafd5a`); the documentation states 9.5.7 as the minimum and records what 9.5 added (domain steps, case
+triggers, workflow version history, JSON Schema inputs, `secretQueryParams`, `connector_ids`, Cases as Data).
+
+Slice boundary: the branch carries 4800 authored changed lines across 11 commits since `origin/main`, past the
+~400-line review slice. The slices are `38d75df` (security workflows), `bc710b2` (platform workflows and the retry
+alert), `a64b76c` (index bootstrap workflows), `f63a047` (secret guard and retry alert tests), `8971167` (CI, seed
+and validator tests), `c897c84` (idempotent deploy and connector provisioning), `2db4739` (documentation),
+`c49f737` (security domain steps), `5cafd5a` (strict validator), `1109831` (stack 9.5.7 documentation) and
+`ea000f4` (close reason).
+
+One deliberate semantic change came with the domain steps: `mark-alert-as-closed` declares a `reason` input that the
+old REST call never sent, so the reason was silently dropped. The domain step takes a `close_reason`, so the input
+is forwarded now, and its default moved from `false_positive` to `other` so that an alert closed without an
+explicit reason is not counted as a false positive.
+
+Deferred to a later increment, documented in `docs/elastic-platform-reference.md`: the five case workflows still
+call `/api/cases` through `kibana.request` — the `cases.*` steps are the typed replacement, but their per-step
+output shape is not documented; `approval-monitor.yaml` still polls case comments instead of using the 9.5 case
+triggers; the mesh keeps its own `approval-requests` index instead of `waitForApproval` (Preview).
+
+L7 (2026-11-23, user, request)
+> "Que queda por hacer? Sabes que tambien debemos agregar la opcion que la auth puede ser usuario/contraseña es unab unea practica"
+
+The user asked for the remaining backlog and for a second authentication mode. The mode was built:
+
+- `scripts/auth.py` is the single place that decides how a target authenticates. `auth_header()` returns
+  `ApiKey <key>` when the API key variable is set, `Basic <base64(user:password)>` when the user and password
+  pair is set, and raises `RuntimeError` when neither is complete. `auth_mode()` reports which one is in use.
+- `scripts/setup.py` (`es_headers`, `kibana_headers`, `validate_env`), `scripts/seed_ecs.py`,
+  `scripts/seed_mitre.py` and `scripts/seed_rules.py` now build their `Authorization` header through that
+  helper, so a deployment can authenticate with `ES_API_KEY` / `KIBANA_API_KEY` **or** with
+  `ES_USERNAME` + `ES_PASSWORD` / `KIBANA_USERNAME` + `KIBANA_PASSWORD`.
+- The API key wins when both are configured for the same target; a username without its password aborts the
+  run with `Set ES_API_KEY, or ES_USERNAME and ES_PASSWORD` instead of sending an anonymous request.
+- `tests/test_auth.py` (11 tests) covers the helper, the setup headers, `validate_env` and the seed headers in
+  both modes; the existing seed test that asserted the old error message was updated.
+- `.github/workflows/deploy.yml` reads the four new secrets; `README.md` and
+  `docs/security/least-privilege.md` document both modes and the trade-off (an API key is scoped and
+  revocable; a user and password attributes every call to a named identity in the audit trail but is
+  long-lived and works interactively, so it needs a scoped native user and a stored secret).
+
+L8 (2026-11-23, independent verification of the auth change, `Risk: item 2`)
+Two read-only verification rounds ran against the auth increment. The first one reported four defects, all
+now fixed and re-verified as PASS:
+
+- D1 (blocker): `seed_operational_knowledge` still built its Elasticsearch header by hand
+  (`"ApiKey {ES_API_KEY}"`), so a user/password deployment sent an empty credential and the two knowledge
+  documents failed with 401. It now goes through `auth_header`.
+- D2: `ensure_connectors` caught only `KeyError`, but `kibana_headers()` raises `RuntimeError` when the
+  credentials are missing; it now catches both and warns instead of raising.
+- D3: `ci.yml` never linted `scripts/auth.py`; both the lint and the format-check steps now include it.
+- D4: the least-privilege note claimed the mode choice affected `setup.py` and the seed scripts, which was
+  false while D1 stood.
+
+The second round added three findings, also fixed:
+
+- The CI test job installed only `pytest requests pyyaml`, but `scripts/setup.py` imports `python-dotenv` and
+  exits when it is missing: the suite could not even be collected, so the CI test job has been broken since
+  the `python-dotenv` change landed on `main`. The dependency is now installed.
+- The password is now rejected when blank but sent verbatim otherwise (a password may legitimately contain
+  spaces), and `auth_mode` treats a blank password as "not configured" so the mode and the header agree.
+- The guard test now covers every script under `scripts/` and both literals (`ApiKey` and `Basic `), so a
+  hand-built header cannot slip in through a new file.
+
+L9 (2026-11-23, the pre-existing enrichment bug)
+The audit had left one defect outside the five findings: `ip-reputation-check.yaml` read the AbuseIPDB
+score through two different paths, so the `HIGH RISK` and `MEDIUM RISK` branches never triggered and the
+workflow always reported `LOW RISK`. The threat assessment now reads the score through the same path as
+the report, and two new tests guard the class of defect rather than the single instance: every
+`steps.<name>` reference must point to a step of the same workflow, and a field read twice from the same
+step must be read through the same path. Both tests fail on the original file and pass on the fixed one.
+
+
+L10 (2026-11-23, the "attack everything" increment)
+The user asked for the whole 9.5.7 backlog to be closed. Four units landed in this increment:
+
+- The five case workflows moved to the GA `cases.*` domain steps (`cases.createCase`, `cases.getCase`,
+  `cases.updateCase`, `cases.addComment`, `cases.addAlerts`). The contract was verified in the Kibana
+  source: every case step returns `{case: {...}}`, so the references now read `output.case.<field>`; the
+  `connector` block of the old REST body is not an accepted input and was dropped; `cases.updateCase`
+  requires the fields inside an `updates` object and the `version` string, which the case response
+  provides; `cases.addAlerts` replaced the hack of posting a fake `type: alert` comment.
+- `approval-monitor.yaml` no longer reads only the last comment. It fetches the fifty newest comments,
+  decides with Liquid over that history (the newest decision after the request wins, a comment that
+  predates the request is never a decision, and "NOT APPROVED" is not an approval), and the `if` steps
+  read that decision token. The old logic lost a decision as soon as anybody wrote an unrelated comment
+  after the approval.
+- `ruff check .` is clean for the first time: the two vendored cloud skill scripts use `datetime.UTC`,
+  and the agent validator test keeps its imports in order with an explicit `noqa` for the path
+  bootstrap.
+- `docs/security/verification-runbook.md` lists the twenty behaviours that only a live 9.5.7 stack can
+  prove, with the command or UI action for each, and the review plan for the branch.
+
+- The case comments (the approval request, the approval decision and the dispatch failure alert) now go
+  through `cases.addComment` instead of the Cases REST API by hand.
+- The `steps.<name>.status` guard is gone. The Kibana source settles it: the engine exposes each step as
+  `{input, output, error}` and no per step status, so the condition could never be true. The index
+  bootstrap now creates the index in the `fallback` of the check step, which the engine runs when the
+  check fails, and the document removal deletes idempotently and reports the result of the delete.
+  `tests/test_workflow_guards.py` fails when a workflow guards a branch on a step status.
+
+Still open, and recorded in the runbook rather than guessed at: the `ai.agent` step, the 9.5.7
+rule-editing fix (#300667), the force delete of a workflow, the `cases.*` payloads, and whether the
+`Authorization` header is echoed in the step logs.

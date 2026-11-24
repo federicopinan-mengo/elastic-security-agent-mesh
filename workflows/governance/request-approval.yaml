@@ -14,6 +14,7 @@ description: Request human approval for a Tier 2 governance-gated action on an e
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - governance
 
@@ -58,10 +59,6 @@ inputs:
     description: "Full context to pass to the target agent when dispatched (case ID, alert details, instructions)"
     required: true
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-
 steps:
 
   - name: generate_approval_id
@@ -70,13 +67,10 @@ steps:
       message: "apr-{{ 'now' | date: '%s%N' }}"
 
   - name: write_approval_request
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/approval-requests/_doc"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /approval-requests/_doc
       body:
         approval_id: "{{ steps.generate_approval_id.output }}"
         case_id: "{{ inputs.case_id }}"
@@ -93,18 +87,10 @@ steps:
         created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
   - name: add_approval_comment
-    type: http
+    type: cases.addComment
     with:
-      method: POST
-      url: "__KIBANA_URL__/api/cases/{{ inputs.case_id }}/comments"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-        elastic-api-version: "2023-10-31"
-      body:
-        type: "user"
-        comment: |
+      case_id: "{{ inputs.case_id }}"
+      comment: |
           ## Tier 2 Action — Human Approval Required
 
           **Approval ID:** {{ steps.generate_approval_id.output }}
@@ -127,7 +113,6 @@ steps:
           **To deny:** Reply with a comment containing **DENIED** and the reason
 
           The approval monitor checks every 2 minutes. Once you respond, the action will be dispatched automatically.
-        owner: "securitySolution"
 
   - name: confirm
     type: console

@@ -18,6 +18,7 @@ description: Routes user requests to the best specialist agent in the security m
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - orchestrator
   - routing
@@ -32,20 +33,15 @@ inputs:
     required: true
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   registry_index: "agent-registry"
 
 steps:
 
   - name: find_agent
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.registry_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.registry_index }}/_search
       body:
         size: 1
         query:
@@ -61,21 +57,21 @@ steps:
 
   - name: check_agent_found
     type: if
-    condition: steps.find_agent.output.data.hits.total.value > 0
+    condition: steps.find_agent.output.hits.total.value > 0
     steps:
 
       - name: log_routing_decision
         type: console
         with:
           message: |
-            Routing to: {{ steps.find_agent.output.data.hits.hits[0]._source.agent_name }}
-            Domain: {{ steps.find_agent.output.data.hits.hits[0]._source.domain }}
-            Score: {{ steps.find_agent.output.data.hits.hits[0]._score }}
+            Routing to: {{ steps.find_agent.output.hits.hits[0]._source.agent_name }}
+            Domain: {{ steps.find_agent.output.hits.hits[0]._source.domain }}
+            Score: {{ steps.find_agent.output.hits.hits[0]._score }}
 
       - name: invoke_specialist
         type: ai.agent
         with:
-          agent_id: "{{ steps.find_agent.output.data.hits.hits[0]._source.agent_id }}"
+          agent_id: "{{ steps.find_agent.output.hits.hits[0]._source.agent_id }}"
           message: "{{ inputs.request }}"
 
       - name: output_response

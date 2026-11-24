@@ -14,15 +14,13 @@ name: "VirusTotal - File Hash Report"
 description: "Get a VirusTotal file report by MD5, SHA-1, or SHA-256 hash"
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - enrichment
   - virustotal
 
 triggers:
   - type: manual
-
-consts:
-  vt_api_key: "__VT_API_KEY__"
 
 inputs:
   - name: file_hash
@@ -33,13 +31,13 @@ inputs:
 steps:
   - name: lookup_hash
     type: http
+    connector-id: oputils-virustotal
+    timeout: "30s"
     with:
-      url: "https://www.virustotal.com/api/v3/files/{{ inputs.file_hash }}"
+      path: "/files/{{ inputs.file_hash }}"
       method: GET
       headers:
-        x-apikey: "{{ consts.vt_api_key }}"
         Accept: application/json
-      timeout: 30s
     on-failure:
       retry:
         max-attempts: 2
@@ -52,17 +50,17 @@ steps:
       message: |
         === VirusTotal File Report ===
         Hash: {{ inputs.file_hash }}
-        
+
         Detection: {{ steps.lookup_hash.output.data.data.attributes.last_analysis_stats.malicious }}/{{ steps.lookup_hash.output.data.data.attributes.last_analysis_stats.malicious | plus: steps.lookup_hash.output.data.data.attributes.last_analysis_stats.undetected }} engines flagged as malicious
         Reputation: {{ steps.lookup_hash.output.data.data.attributes.reputation }}
         File type: {{ steps.lookup_hash.output.data.data.attributes.type_description }}
         File size: {{ steps.lookup_hash.output.data.data.attributes.size }} bytes
         First seen: {{ steps.lookup_hash.output.data.data.attributes.first_submission_date }}
         Last analysed: {{ steps.lookup_hash.output.data.data.attributes.last_analysis_date }}
-        
+
         Names: {{ steps.lookup_hash.output.data.data.attributes.names | join: ", " }}
         Tags: {{ steps.lookup_hash.output.data.data.attributes.tags | join: ", " }}
-        
+
         {% if steps.lookup_hash.output.data.data.attributes.last_analysis_stats.malicious > 5 %}
         VERDICT: HIGH RISK — multiple engines detect this file as malicious
         {% elsif steps.lookup_hash.output.data.data.attributes.last_analysis_stats.malicious > 0 %}

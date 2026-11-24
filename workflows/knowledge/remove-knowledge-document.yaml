@@ -2,8 +2,9 @@
 # Workflow: Remove Knowledge Document
 # Category: knowledge
 #
-# Deletes a document from any Elasticsearch index by ID. Checks that the
-# document exists before attempting deletion and reports the outcome.
+# Deletes a document from any Elasticsearch index by ID. Reads the document
+# first to show the target and tolerates a missing one: the delete is
+# idempotent, so a document that is already gone is not an error.
 #
 # This is a generic building block with no opinions on index mapping.
 #
@@ -15,6 +16,7 @@ description: Delete a document from any Elasticsearch index by ID.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - data
   - knowledge
@@ -32,46 +34,31 @@ inputs:
     description: The document ID to delete
     required: true
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-
 steps:
 
   - name: get_document
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
     on-failure:
       continue: true
 
-  - name: check_exists
-    type: if
-    condition: 'steps.get_document.status: "success"'
-    steps:
+  - name: delete_document
+    type: elasticsearch.request
+    with:
+      method: DELETE
+      path: "/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
+    on-failure:
+      continue: true
 
-      - name: delete_document
-        type: http
-        with:
-          method: DELETE
-          url: "{{ consts.es_url }}/{{ inputs.index_name }}/_doc/{{ inputs.document_id }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
-
-      - name: confirm
-        type: console
-        with:
-          message: "Document {{ inputs.document_id }} removed from {{ inputs.index_name }}"
-
-    else:
-
-      - name: not_found
-        type: console
-        with:
-          message: "Document {{ inputs.document_id }} not found in {{ inputs.index_name }}"
+  - name: confirm
+    type: console
+    with:
+      message: |-
+        {% if steps.delete_document.output.result == "deleted" %}
+        Document {{ inputs.document_id }} removed from {{ inputs.index_name }}.
+        {% else %}
+        Document {{ inputs.document_id }} not found in {{ inputs.index_name }}.
+        {% endif %}
 

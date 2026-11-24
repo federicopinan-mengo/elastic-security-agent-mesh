@@ -16,6 +16,7 @@ description: Create the approval-requests index for tracking governance-gated ac
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - setup
   - infrastructure
@@ -25,82 +26,77 @@ triggers:
   - type: manual
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   index_name: "approval-requests"
 
 steps:
 
   - name: check_index_exists
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ consts.index_name }}"
-      headers:
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.index_name }}"
     on-failure:
+      fallback:
+
+        - name: create_index
+          type: elasticsearch.request
+          with:
+            method: PUT
+            path: "/{{ consts.index_name }}"
+            headers:
+              Content-Type: application/json
+            body:
+              settings:
+                number_of_shards: 1
+                number_of_replicas: 1
+              mappings:
+                properties:
+                  approval_id:
+                    type: keyword
+                  case_id:
+                    type: keyword
+                  investigation_id:
+                    type: keyword
+                  requesting_agent:
+                    type: keyword
+                  target_agent:
+                    type: keyword
+                  action_type:
+                    type: keyword
+                  action_details:
+                    type: text
+                  context:
+                    type: text
+                  target:
+                    type: keyword
+                  status:
+                    type: keyword
+                  risk_tier:
+                    type: keyword
+                  justification:
+                    type: text
+                  created_at:
+                    type: date
+                  resolved_at:
+                    type: date
+                  resolved_by:
+                    type: keyword
+                  execution_result:
+                    type: text
+
+        - name: confirm_creation
+          type: console
+          with:
+            message: >-
+              Approval requests index created. Agents can now submit
+              structured approval requests.
       continue: true
 
-  - name: create_or_skip
-    type: if
-    condition: 'steps.check_index_exists.status: "success"'
-    steps:
 
-      - name: already_exists
-        type: console
-        with:
-          message: "Index {{ consts.index_name }} already exists. Skipping creation."
-
-    else:
-
-      - name: create_index
-        type: http
-        with:
-          method: PUT
-          url: "{{ consts.es_url }}/{{ consts.index_name }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
-          body:
-            settings:
-              number_of_shards: 1
-              number_of_replicas: 1
-            mappings:
-              properties:
-                approval_id:
-                  type: keyword
-                case_id:
-                  type: keyword
-                investigation_id:
-                  type: keyword
-                requesting_agent:
-                  type: keyword
-                target_agent:
-                  type: keyword
-                action_type:
-                  type: keyword
-                action_details:
-                  type: text
-                context:
-                  type: text
-                target:
-                  type: keyword
-                status:
-                  type: keyword
-                risk_tier:
-                  type: keyword
-                justification:
-                  type: text
-                created_at:
-                  type: date
-                resolved_at:
-                  type: date
-                resolved_by:
-                  type: keyword
-                execution_result:
-                  type: text
-
-      - name: confirm_creation
-        type: console
-        with:
-          message: "Approval requests index created. Agents can now submit structured approval requests."
+  - name: report_index_state
+    type: console
+    with:
+      message: |-
+        {% if steps.check_index_exists.output %}
+        Index {{ consts.index_name }} already exists.
+        {% endif %}

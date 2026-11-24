@@ -182,29 +182,30 @@ trigger:
 
 Workflow-level constants. Values that don't change between executions.
 
+`consts` holds **non-secret values only** (index names, agent ids, base URLs that carry no credential). It must never
+hold an API key, token or password: credentials live in the workflow execution context or in a Kibana connector.
+
 ```yaml
 consts:
-  # API configuration
-  api_base_url: "https://api.virustotal.com/v3"
-  api_key: "your-api-key-here"
-  
+  # Index patterns
+  alerts_index: ".alerts-security*"
+
   # Threshold values
   severity_threshold: 7
   max_results: 100
-  
-  # Index patterns
-  alerts_index: ".alerts-security*"
 ```
 
 **Usage in steps:**
 ```yaml
 steps:
-  - name: query_api
-    type: http
+  - name: search_alerts
+    type: elasticsearch.request
     with:
-      url: "{{ consts.api_base_url }}/files"
-      headers:
-        x-apikey: "{{ consts.api_key }}"
+      method: POST
+      path: "/{{ consts.alerts_index }}/_search"
+      body:
+        query:
+          match_all: {}
 ```
 
 ### `inputs` (object or array)
@@ -393,16 +394,19 @@ steps:
 | Action | Description |
 |--------|-------------|
 | `console` | Log a message |
-| `http` | Make HTTP requests |
+| `http` | Make HTTP requests (add `connector-id` when the target API needs a credential) |
+| `elasticsearch.request` | Call Elasticsearch; authenticates with the execution context, no API key in the step |
 | `elasticsearch.search` | Search Elasticsearch |
 | `elasticsearch.index` | Index documents |
-| `kibana.request` | Make Kibana API requests |
+| `kibana.request` | Call Kibana APIs; authenticates with the execution context, no API key in the step |
 | `kibana.cases` | Create/update cases |
 | `foreach` | Loop over arrays |
 | `parallel` | Execute steps in parallel |
 | `wait` | Pause execution |
 
 ### HTTP Action
+
+For an API that needs no credential, use the full URL:
 
 ```yaml
 - name: api_call
@@ -411,11 +415,56 @@ steps:
     url: "https://api.example.com/endpoint"
     method: POST  # GET, POST, PUT, DELETE, PATCH
     headers:
-      Authorization: "Bearer {{ consts.token }}"
       Content-Type: application/json
     body:
       key: "value"
     timeout: 30s
+```
+
+For an API that needs a credential, use a Kibana connector. The step references the connector with `connector-id` at
+step level and the path relative to the connector's base URL; the secret is stored in the connector's secrets in Kibana,
+never in the YAML:
+
+```yaml
+- name: lookup_ip
+  type: http
+  connector-id: oputils-virustotal
+  timeout: "30s"
+  with:
+    path: "/ip_addresses/{{ inputs.ip_address }}"
+    method: GET
+```
+
+### Elasticsearch Request
+
+`elasticsearch.request` calls Elasticsearch with the credential of the workflow execution context. The path is relative
+to the Elasticsearch root; no API key, `Authorization` or `kbn-xsrf` header belongs in the step.
+
+```yaml
+- name: search_alerts
+  type: elasticsearch.request
+  with:
+    method: POST
+    path: "/{{ consts.alerts_index }}/_search"
+    body:
+      size: 100
+      query:
+        match_all: {}
+```
+
+### Kibana Request
+
+`kibana.request` calls Kibana with the credential of the workflow execution context. The path starts with `/api/`.
+
+```yaml
+- name: add_comment
+  type: kibana.request
+  with:
+    method: POST
+    path: "/api/cases/{{ inputs.case_id }}/comments"
+    body:
+      type: "user"
+      comment: "{{ inputs.comment }}"
 ```
 
 ### Elasticsearch Search
@@ -493,11 +542,11 @@ Use double curly braces to reference values:
 
 | Context | Description | Example |
 |---------|-------------|---------|
-| `consts` | Workflow constants | `{{ consts.api_key }}` |
+| `consts` | Workflow constants (non-secret values only) | `{{ consts.alerts_index }}` |
 | `inputs` | Workflow inputs | `{{ inputs.target_ip }}` |
 | `steps` | Step outputs | `{{ steps.search.output.hits }}` |
 | `foreach` | Current loop item | `{{ foreach.item._id }}` |
-| `env` | Environment variables | `{{ env.API_KEY }}` |
+| `env` | Environment variables | `{{ env.HOME }}` |
 
 ### Accessing Nested Values
 
@@ -595,17 +644,14 @@ steps:
 
 ```yaml
 name: API Integration
-consts:
-  api_url: "https://api.service.com"
-  api_key: "your-key"
 
 steps:
   - name: fetch_data
     type: http
+    connector-id: oputils-example
     with:
-      url: "{{ consts.api_url }}/data"
-      headers:
-        Authorization: "Bearer {{ consts.api_key }}"
+      path: "/data"
+      method: GET
     on-failure:
       retry:
         max-attempts: 3
@@ -669,8 +715,9 @@ steps:
     steps:
       - name: alert_if_high
         type: http
+        connector-id: oputils-example
         with:
-          url: "{{ consts.alert_webhook }}"
+          path: "/alerts"
           method: POST
           body:
             message: "High event count: {{ steps.count_events.output.aggregations.event_count.value }}"

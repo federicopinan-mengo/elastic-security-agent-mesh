@@ -22,6 +22,7 @@ description: Polls for pending async dispatch requests and invokes target agents
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - mesh
   - scheduled
@@ -31,25 +32,16 @@ triggers:
     with:
       every: "1m"
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-  kibana_url: "__KIBANA_URL__"
-  kibana_api_key: "__KIBANA_API_KEY__"
-
 steps:
 
   # ── Step 1: Find pending dispatch requests ──────────────────────────────
   - name: find_pending
-    type: http
+    type: elasticsearch.request
     on-failure:
       continue: true
     with:
       method: POST
-      url: "{{ consts.es_url }}/dispatch-requests/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /dispatch-requests/_search
       body:
         size: 3
         query:
@@ -64,18 +56,15 @@ steps:
   # ── Step 2: Process each pending dispatch ───────────────────────────────
   - name: process_dispatches
     type: foreach
-    foreach: "{{ steps.find_pending.output.data.hits.hits }}"
+    foreach: "{{ steps.find_pending.output.hits.hits }}"
     steps:
 
       # 2a. Mark as dispatched (prevents re-processing on next run)
       - name: mark_dispatched
-        type: http
+        type: elasticsearch.request
         with:
           method: POST
-          url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
+          path: /dispatch-requests/_update/{{ foreach.item._id }}
           body:
             doc:
               status: "dispatched"
@@ -114,15 +103,12 @@ steps:
           # the threshold (3 attempts). If at or over, mark as permanently
           # failed and notify on the case.
           - name: retry_or_fail
-            type: http
+            type: elasticsearch.request
             on-failure:
               continue: true
             with:
               method: POST
-              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
-              headers:
-                Content-Type: application/json
-                Authorization: "ApiKey {{ consts.es_api_key }}"
+              path: /dispatch-requests/_update/{{ foreach.item._id }}
               body:
                 script:
                   source: >
@@ -140,50 +126,72 @@ steps:
                   params:
                     now: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
-          - name: log_failure
+          # Re-read the dispatch so the branch sees the state the script just
+          # wrote. The foreach item is the search snapshot, taken before the
+          # increment, so it cannot answer "were the attempts exhausted?".
+          - name: reload
+            type: elasticsearch.request
+            on-failure:
+              continue: true
+            with:
+              method: GET
+              path: /dispatch-requests/_doc/{{ foreach.item._id }}
+
+          # Null-safe extraction: on a failed reload the step output is null
+          # and reading a field on it would throw inside the KQL condition.
+          - name: dispatch_status
             type: console
             with:
-              message: "Dispatch {{ foreach.item._source.dispatch_id }} to {{ foreach.item._source.target_agent }} failed — reset to pending for retry."
+              message: >-
+                {{ steps.reload.output._source.status | default: 'unknown' }}
 
           - name: check_retries_exhausted
             type: if
-            condition: 'foreach.item._source.retry_count: 2'
+            condition: 'steps.dispatch_status.output: failed'
             steps:
+
+              - name: log_failure_final
+                type: console
+                with:
+                  message: >-
+                    Dispatch {{ foreach.item._source.dispatch_id }} to
+                    {{ foreach.item._source.target_agent }} failed permanently
+                    after {{ steps.reload.output._source.retry_count }}
+                    attempts.
+
               - name: notify_failure_on_case
-                type: http
+                type: cases.addComment
                 on-failure:
                   continue: true
                 with:
-                  method: POST
-                  url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.kibana_api_key }}"
-                    kbn-xsrf: "true"
-                    elastic-api-version: "2023-10-31"
-                  body:
-                    type: "user"
-                    comment: |
+                  case_id: "{{ foreach.item._source.case_id }}"
+                  comment: |
                       ## Agent Dispatch Failed After 3 Attempts
 
                       **Dispatch ID:** {{ foreach.item._source.dispatch_id }}
                       **Target Agent:** {{ foreach.item._source.target_agent }}
 
                       The agent call failed 3 times (likely due to repeated timeouts or model errors). A human may need to investigate manually or retry by setting the dispatch status back to "pending" in the dispatch-requests index.
-                    owner: "securitySolution"
+
+            else:
+
+              - name: log_failure
+                type: console
+                with:
+                  message: >-
+                    Dispatch {{ foreach.item._source.dispatch_id }} to
+                    {{ foreach.item._source.target_agent }} failed
+                    (status {{ steps.dispatch_status.output }}).
 
         else:
 
           - name: mark_completed
-            type: http
+            type: elasticsearch.request
             on-failure:
               continue: true
             with:
               method: POST
-              url: "{{ consts.es_url }}/dispatch-requests/_update/{{ foreach.item._id }}"
-              headers:
-                Content-Type: application/json
-                Authorization: "ApiKey {{ consts.es_api_key }}"
+              path: /dispatch-requests/_update/{{ foreach.item._id }}
               body:
                 doc:
                   status: "completed"

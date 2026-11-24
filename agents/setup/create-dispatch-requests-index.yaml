@@ -15,6 +15,7 @@ description: Create the dispatch-requests index for async agent-to-agent dispatc
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - setup
   - infrastructure
@@ -23,74 +24,69 @@ triggers:
   - type: manual
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   index_name: "dispatch-requests"
 
 steps:
 
   - name: check_index_exists
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ consts.index_name }}"
-      headers:
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.index_name }}"
     on-failure:
+      fallback:
+
+        - name: create_index
+          type: elasticsearch.request
+          with:
+            method: PUT
+            path: "/{{ consts.index_name }}"
+            headers:
+              Content-Type: application/json
+            body:
+              settings:
+                number_of_shards: 1
+                number_of_replicas: 1
+              mappings:
+                properties:
+                  dispatch_id:
+                    type: keyword
+                  requesting_agent:
+                    type: keyword
+                  target_agent:
+                    type: keyword
+                  case_id:
+                    type: keyword
+                  investigation_id:
+                    type: keyword
+                  priority:
+                    type: keyword
+                  context:
+                    type: text
+                  status:
+                    type: keyword
+                  created_at:
+                    type: date
+                  dispatched_at:
+                    type: date
+                  completed_at:
+                    type: date
+                  result_summary:
+                    type: text
+
+        - name: confirm_creation
+          type: console
+          with:
+            message: >-
+              Dispatch requests index created. Agents can now write async
+              dispatch requests.
       continue: true
 
-  - name: create_or_skip
-    type: if
-    condition: 'steps.check_index_exists.status: "success"'
-    steps:
 
-      - name: already_exists
-        type: console
-        with:
-          message: "Index {{ consts.index_name }} already exists. Skipping creation."
-
-    else:
-
-      - name: create_index
-        type: http
-        with:
-          method: PUT
-          url: "{{ consts.es_url }}/{{ consts.index_name }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
-          body:
-            settings:
-              number_of_shards: 1
-              number_of_replicas: 1
-            mappings:
-              properties:
-                dispatch_id:
-                  type: keyword
-                requesting_agent:
-                  type: keyword
-                target_agent:
-                  type: keyword
-                case_id:
-                  type: keyword
-                investigation_id:
-                  type: keyword
-                priority:
-                  type: keyword
-                context:
-                  type: text
-                status:
-                  type: keyword
-                created_at:
-                  type: date
-                dispatched_at:
-                  type: date
-                completed_at:
-                  type: date
-                result_summary:
-                  type: text
-
-      - name: confirm_creation
-        type: console
-        with:
-          message: "Dispatch requests index created. Agents can now write async dispatch requests."
+  - name: report_index_state
+    type: console
+    with:
+      message: |-
+        {% if steps.check_index_exists.output %}
+        Index {{ consts.index_name }} already exists.
+        {% endif %}

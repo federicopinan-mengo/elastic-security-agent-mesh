@@ -12,6 +12,7 @@ description: Find detection rules mapped to a specific MITRE ATT&CK technique.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection-engineering
   - mitre
@@ -32,16 +33,17 @@ inputs:
 steps:
 
   - name: search_rules
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/api/detection_engine/rules/_find?per_page={{ inputs.per_page }}&search={{ inputs.technique_id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/api/detection_engine/rules/_find"
+      query:
+        per_page: "{{ inputs.per_page }}"
+        search: "{{ inputs.technique_id }}"
 
   - name: output_results
     type: console
     with:
-      message: |
-        Found {{ steps.search_rules.output.data.total }} rules potentially matching technique {{ inputs.technique_id }}
+      message: "Found {{ steps.search_rules.output.total }} rules potentially
+        matching technique {{ inputs.technique_id }}\n\
+        "

@@ -11,10 +11,12 @@
 #   response → writes dispatch request → dispatch monitor invokes agent
 #
 # Detection strategy:
-#   1. Fetch the single most recent case comment
-#   2. Extract its text via Liquid (not the whole JSON blob)
-#   3. If the text matches the approval request template → still pending
-#   4. Otherwise check for APPROVED / DENIED via KQL wildcard
+#   1. Fetch the 50 most recent case comments (newest first)
+#   2. Decide with Liquid over that history: the newest decision that comes
+#      after the approval request wins, and a comment that predates the
+#      request is never read as a decision
+#   3. APPROVED or DENIED decide it; an explicit "not approved" is not a
+#      decision and leaves the request pending
 #
 # Dispatch strategy:
 #   Instead of calling the agent directly (which blocks on 5+ min agent
@@ -29,6 +31,7 @@ description: Polls for human responses to pending approval requests and dispatch
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - governance
   - scheduled
@@ -38,25 +41,16 @@ triggers:
     with:
       every: "2m"
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-  kibana_url: "__KIBANA_URL__"
-  kibana_api_key: "__KIBANA_API_KEY__"
-
 steps:
 
   # ── Step 1: Find all pending approval requests ──────────────────────────
   - name: find_pending
-    type: http
+    type: elasticsearch.request
     on-failure:
       continue: true
     with:
       method: POST
-      url: "{{ consts.es_url }}/approval-requests/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /approval-requests/_search
       body:
         size: 10
         query:
@@ -70,58 +64,81 @@ steps:
     on-failure:
       continue: true
     with:
-      message: "Found {{ steps.find_pending.output.data.hits.total.value | default: 0 }} pending approval requests."
+      message: >-
+        Found {{ steps.find_pending.output.hits.total.value | default: 0 }}
+        pending approval requests.
 
   # ── Step 2: Process each pending request ────────────────────────────────
   - name: process_approvals
     type: foreach
-    foreach: "{{ steps.find_pending.output.data.hits.hits }}"
+    foreach: "{{ steps.find_pending.output.hits.hits }}"
     steps:
 
-      # 2a. Fetch the SINGLE most recent comment on the case
-      - name: fetch_latest_comment
-        type: http
+      # 2a. Fetch the most recent comments on the case, newest first.
+      - name: fetch_recent_comments
+        type: kibana.request
         on-failure:
           continue: true
         with:
           method: GET
-          url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments/_find?sortOrder=desc&perPage=1"
-          headers:
-            Authorization: "ApiKey {{ consts.kibana_api_key }}"
-            kbn-xsrf: "true"
-            elastic-api-version: "2023-10-31"
+          path: /api/cases/{{ foreach.item._source.case_id }}/comments/_find
+          query:
+            sortOrder: desc
+            perPage: 50
 
-      # 2b. Extract ONLY the comment text field — not the entire JSON response.
-      - name: latest_comment_text
+      # 2b. Decide from the comment history, not from the last comment only.
+      #     The newest decision after the approval request wins, and the
+      #     request template itself is never read as a decision.
+      - name: decide_approval
         type: console
         on-failure:
           continue: true
         with:
-          message: "{{ steps.fetch_latest_comment.output.data.comments[0].comment | default: '' | strip }}"
+          message: |
+            {% assign comments = steps.fetch_recent_comments.output.comments %}
+            {% assign decision = 'PENDING' %}
+            {% for c in comments %}
+              {% assign text = c.comment | default: '' %}
+              {% if text contains 'Human Approval Required' %}
+                {% break %}
+              {% elsif decision == 'PENDING' %}
+                {% if text contains 'DENIED' %}
+                  {% assign decision = 'DENIED' %}
+                {% elsif text contains 'NOT APPROVED' %}
+                  {% assign decision = 'PENDING' %}
+                {% elsif text contains 'APPROVED' %}
+                  {% assign decision = 'APPROVED' %}
+                {% endif %}
+              {% endif %}
+            {% endfor %}
+            {{ decision }}
 
-      - name: log_latest_comment
+      - name: log_decision
         type: console
         with:
-          message: "Latest comment on case {{ foreach.item._source.case_id }}: {{ steps.latest_comment_text.output | truncate: 80 }}"
+          message: >-
+            Approval {{ foreach.item._source.approval_id }} — decision:
+            {{ steps.decide_approval.output | strip | truncate: 40 }}
 
-      # 2c. If the latest comment IS the approval request template, no one
-      #     has responded yet.
-      - name: check_is_approval_request
+      # 2c. No decision in the comment history yet.
+      - name: check_still_pending
         type: if
-        condition: 'steps.latest_comment_text.output: *Human Approval Required*'
+        condition: 'steps.decide_approval.output: *PENDING*'
         steps:
 
           - name: log_still_pending
             type: console
             with:
-              message: "Approval {{ foreach.item._source.approval_id }} still pending — latest comment is the approval request itself."
+              message: >-
+                Approval {{ foreach.item._source.approval_id }} still pending —
+                no decision in the case comments yet.
 
         else:
 
           # ── A newer comment exists — check for human decision ───────────
           - name: check_approved
             type: if
-            condition: 'steps.latest_comment_text.output: *APPROVED*'
+            condition: 'steps.decide_approval.output: *APPROVED*'
             steps:
 
               - name: log_approval
@@ -130,13 +147,10 @@ steps:
                   message: "Approval {{ foreach.item._source.approval_id }} APPROVED by human. Queuing dispatch for {{ foreach.item._source.target_agent }}."
 
               - name: mark_approved
-                type: http
+                type: elasticsearch.request
                 with:
                   method: POST
-                  url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.es_api_key }}"
+                  path: /approval-requests/_update/{{ foreach.item._id }}
                   body:
                     doc:
                       status: "approved"
@@ -147,15 +161,12 @@ steps:
               # The dispatch monitor picks this up within 1 minute and handles
               # invocation, retry, and failure notification.
               - name: write_dispatch
-                type: http
+                type: elasticsearch.request
                 on-failure:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.es_url }}/dispatch-requests/_doc"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.es_api_key }}"
+                  path: /dispatch-requests/_doc
                   body:
                     dispatch_id: "apr-dispatch-{{ foreach.item._source.approval_id }}"
                     requesting_agent: "approval-monitor"
@@ -185,35 +196,24 @@ steps:
                     created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
               - name: mark_executed
-                type: http
+                type: elasticsearch.request
                 on-failure:
                   continue: true
                 with:
                   method: POST
-                  url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.es_api_key }}"
+                  path: /approval-requests/_update/{{ foreach.item._id }}
                   body:
                     doc:
                       status: "executed"
                       execution_result: "Dispatch request queued for {{ foreach.item._source.target_agent }}."
 
               - name: add_executed_comment
-                type: http
+                type: cases.addComment
                 on-failure:
                   continue: true
                 with:
-                  method: POST
-                  url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments"
-                  headers:
-                    Content-Type: application/json
-                    Authorization: "ApiKey {{ consts.kibana_api_key }}"
-                    kbn-xsrf: "true"
-                    elastic-api-version: "2023-10-31"
-                  body:
-                    type: "user"
-                    comment: |
+                  case_id: "{{ foreach.item._source.case_id }}"
+                  comment: |
                       ## Action Approved and Dispatched
 
                       **Approval ID:** {{ foreach.item._source.approval_id }}
@@ -221,14 +221,13 @@ steps:
                       **Dispatched to:** {{ foreach.item._source.target_agent }}
 
                       The approved action has been queued for dispatch. The dispatch monitor will invoke the agent within 1 minute. Results will be posted as follow-up comments.
-                    owner: "securitySolution"
 
             else:
 
               # ── Check for DENIED ──────────────────────────────────────────
               - name: check_denied
                 type: if
-                condition: 'steps.latest_comment_text.output: *DENIED*'
+                condition: 'steps.decide_approval.output: *DENIED*'
                 steps:
 
                   - name: log_denial
@@ -237,13 +236,10 @@ steps:
                       message: "Approval {{ foreach.item._source.approval_id }} DENIED by human."
 
                   - name: mark_denied
-                    type: http
+                    type: elasticsearch.request
                     with:
                       method: POST
-                      url: "{{ consts.es_url }}/approval-requests/_update/{{ foreach.item._id }}"
-                      headers:
-                        Content-Type: application/json
-                        Authorization: "ApiKey {{ consts.es_api_key }}"
+                      path: /approval-requests/_update/{{ foreach.item._id }}
                       body:
                         doc:
                           status: "rejected"
@@ -251,31 +247,27 @@ steps:
                           resolved_by: "human"
 
                   - name: add_denied_comment
-                    type: http
+                    type: cases.addComment
                     on-failure:
                       continue: true
                     with:
-                      method: POST
-                      url: "{{ consts.kibana_url }}/api/cases/{{ foreach.item._source.case_id }}/comments"
-                      headers:
-                        Content-Type: application/json
-                        Authorization: "ApiKey {{ consts.kibana_api_key }}"
-                        kbn-xsrf: "true"
-                        elastic-api-version: "2023-10-31"
-                      body:
-                        type: "user"
-                        comment: |
+                      case_id: "{{ foreach.item._source.case_id }}"
+                      comment: |
                           ## Action Denied
 
                           **Approval ID:** {{ foreach.item._source.approval_id }}
                           **Action:** {{ foreach.item._source.action_type }} on {{ foreach.item._source.target }}
 
                           This action was denied by a human reviewer. No action has been taken.
-                        owner: "securitySolution"
 
                 else:
 
                   - name: log_unrecognized
                     type: console
                     with:
-                      message: "Approval {{ foreach.item._source.approval_id }} — new comment on case but no APPROVED/DENIED keyword found. Comment: {{ steps.latest_comment_text.output | truncate: 120 }}"
+                      message: >-
+                        Approval
+                        {{ foreach.item._source.approval_id }} — comment
+                        history holds no APPROVED/DENIED keyword. Decision:
+                        {{ steps.decide_approval.output | strip
+                        | truncate: 40 }}

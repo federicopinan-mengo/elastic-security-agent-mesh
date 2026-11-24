@@ -25,6 +25,7 @@ description: >
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - metrics
   - observability
@@ -46,8 +47,6 @@ inputs:
     default: 90
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   agent_metrics_index: "agent-metrics"
   agent_registry_index: "agent-registry"
   dispatch_requests_index: "dispatch-requests"
@@ -58,13 +57,10 @@ steps:
 
   # ── Step 1: Get all registered agents ────────────────────────────────────
   - name: get_registered_agents
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.agent_registry_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.agent_registry_index }}/_search
       body:
         size: 100
         query:
@@ -79,13 +75,10 @@ steps:
 
   # ── Step 2: Collect dispatch metrics ──────────────────────────────────────
   - name: collect_dispatch_metrics
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.dispatch_requests_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.dispatch_requests_index }}/_search
       body:
         size: 0
         query:
@@ -106,13 +99,10 @@ steps:
 
   # ── Step 3: Collect investigation metrics ─────────────────────────────────
   - name: collect_investigation_metrics
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.investigation_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.investigation_index }}/_search
       body:
         size: 0
         query:
@@ -139,13 +129,10 @@ steps:
 
   # ── Step 4: Collect action policy metrics (tier distribution) ─────────────
   - name: collect_action_tier_metrics
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.action_policies_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.action_policies_index }}/_search
       body:
         size: 0
         aggs:
@@ -161,9 +148,9 @@ steps:
     with:
       message: |
         Metrics collection summary:
-        - Active agents: {{ steps.get_registered_agents.output.data.hits.total.value | default: 0 }}
-        - Dispatch agents aggregated: {{ steps.collect_dispatch_metrics.output.data.aggregations.by_agent.buckets | size | default: 0 }}
-        - Investigation agents aggregated: {{ steps.collect_investigation_metrics.output.data.aggregations.by_agent.buckets | size | default: 0 }}
+        - Active agents: {{ steps.get_registered_agents.output.hits.total.value | default: 0 }}
+        - Dispatch agents aggregated: {{ steps.collect_dispatch_metrics.output.aggregations.by_agent.buckets | size | default: 0 }}
+        - Investigation agents aggregated: {{ steps.collect_investigation_metrics.output.aggregations.by_agent.buckets | size | default: 0 }}
         - Retention: {{ inputs.retention_days }} days
 
   # ── Step 6: Write per-agent metrics documents ─────────────────────────────
@@ -178,10 +165,10 @@ steps:
         for one agent. Document IDs are idempotent (agent_id + period_end).
 
         Dispatch aggregation:
-        {{ steps.collect_dispatch_metrics.output.data.aggregations.by_agent.buckets | size | default: 0 }} agents with dispatch activity.
+        {{ steps.collect_dispatch_metrics.output.aggregations.by_agent.buckets | size | default: 0 }} agents with dispatch activity.
 
         Investigation aggregation:
-        {{ steps.collect_investigation_metrics.output.data.aggregations.by_agent.buckets | size | default: 0 }} agents with investigation activity.
+        {{ steps.collect_investigation_metrics.output.aggregations.by_agent.buckets | size | default: 0 }} agents with investigation activity.
 
         Note: Full per-agent doc writes require a for-each step type which
         is not yet available. This workflow logs the aggregated data.
@@ -189,13 +176,10 @@ steps:
 
   # ── Step 7: Cleanup old metrics ─────────────────────────────────────────
   - name: cleanup_old_metrics
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.agent_metrics_index }}/_delete_by_query"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.agent_metrics_index }}/_delete_by_query
       body:
         query:
           range:
@@ -216,6 +200,6 @@ steps:
       message: |
         Agent Metrics Collector run complete.
         Period: last {{ inputs.lookback_minutes }} minutes.
-        Active agents tracked: {{ steps.get_registered_agents.output.data.hits.total.value | default: 0 }}.
+        Active agents tracked: {{ steps.get_registered_agents.output.hits.total.value | default: 0 }}.
         Old metrics (> {{ inputs.retention_days }} days) cleaned up.
         View metrics in Kibana Lens: index=agent-metrics, fields=agent_id, decisions_total, tp_classifications, escalations_to_l2.

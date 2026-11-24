@@ -21,7 +21,7 @@ Before importing workflows, ensure you have:
 
 ### 1. Kibana Access
 
-- Kibana 9.3 or later with Workflows feature enabled (Via Advanced Settings)
+- Elastic Stack 9.5.7 or later (Kibana 9.5.7+) with Workflows feature enabled (Via Advanced Settings)
 - User with appropriate permissions:
 
 <img width="575" height="560" alt="image" src="https://github.com/user-attachments/assets/c4ed0461-3b39-453e-8d0b-19464e329d4b" />
@@ -37,6 +37,9 @@ Create an API key in Kibana:
 2. Click **Create API key**
 3. Configure any relevant permissions
 4. Save the generated API key
+
+This key authenticates your client against the Kibana import API only. It is never part of a workflow: the workflows in
+this repository contain no credentials.
 
 ### 3. Network Access
 
@@ -63,25 +66,25 @@ The simplest way to import a single workflow.
    - Paste into the Kibana editor
 
 4. **Customize Configuration**
-   - Update `consts` section with your API keys and URLs
+   - Update the `consts` section with your environment's non-secret values (index names, agent ids)
    - Modify inputs as needed for your environment
+   - Never add credentials to the YAML: Elasticsearch and Kibana calls authenticate from the workflow execution
+     context, and third-party APIs authenticate through a Kibana connector
 
 5. **Validate and Save**
    - Kibana will validate the YAML automatically
    - Fix any validation errors
    - Click **Save**
 
-### Example: Importing Hash Threat Check
+### Example: Importing a VirusTotal Enrichment Workflow
 
-1. Open [`workflows/security/detection/hash-threat-check.yaml`](../workflows/security/detection/hash-threat-check.yaml)
+1. Open [`workflows/security/enrichment/vt-ip-report.yaml`](../workflows/security/enrichment/vt-ip-report.yaml)
 2. Copy the content
 3. In Kibana, create new workflow and paste
-4. Update the VirusTotal API key:
-   ```yaml
-   consts:
-     virustotal_api_key: YOUR_ACTUAL_API_KEY  # Replace this
-   ```
-5. Save and test
+4. Make sure the VirusTotal connector exists in Kibana: type `.http`, base URL
+   `https://www.virustotal.com/api/v3`, your API key stored as a secret header, and the connector named
+   `oputils-virustotal` — that is the `connector-id` the step references
+5. Save and test — there is nothing to substitute in the YAML, the step authenticates through the connector
 
 ---
 
@@ -90,6 +93,9 @@ The simplest way to import a single workflow.
 Import workflows programmatically using the Kibana REST API.
 
 ### Basic API Call
+
+The API key below authenticates **the import call to Kibana**. It is not part of the workflow: the YAML you import
+contains no credentials.
 
 ```bash
 curl -X POST "https://YOUR_KIBANA_URL/api/workflows" \
@@ -104,7 +110,7 @@ curl -X POST "https://YOUR_KIBANA_URL/api/workflows" \
 
 ```bash
 # Read file and escape for JSON
-YAML_CONTENT=$(cat workflows/detection/hash-threat-check.yaml)
+YAML_CONTENT=$(cat workflows/security/enrichment/vt-ip-report.yaml)
 
 curl -X POST "https://YOUR_KIBANA_URL/api/workflows" \
   -H "kbn-xsrf: true" \
@@ -123,7 +129,7 @@ EOF
 ```bash
 # Install jq if not available: brew install jq (macOS) or apt install jq (Linux)
 
-cat workflows/detection/hash-threat-check.yaml | \
+cat workflows/security/enrichment/vt-ip-report.yaml | \
   jq -Rs '{yaml: .}' | \
   curl -X POST "https://YOUR_KIBANA_URL/api/workflows" \
     -H "kbn-xsrf: true" \
@@ -283,10 +289,10 @@ echo "Import complete!"
 ./bulk_import.sh workflows/
 
 # Import specific category
-./bulk_import.sh workflows/detection/
+./bulk_import.sh workflows/security/detection/
 
 # With environment variables
-KIBANA_URL=https://my-kibana.example.com API_KEY=abc123 ./bulk_import.sh
+KIBANA_URL=https://my-kibana.example.com API_KEY=your-import-key ./bulk_import.sh
 ```
 
 ### Python Bulk Import
@@ -374,43 +380,57 @@ if __name__ == "__main__":
 
 Before importing, customize workflows for your environment.
 
-### 1. Update API Keys
+### 1. Configure Credentials
 
-Replace placeholder values in `consts`:
+Workflows carry no credentials, so there is nothing to substitute before import:
 
-```yaml
-# Before
-consts:
-  virustotal_api_key: API-KEY
-  slack_webhook: https://hooks.slack.com/...
+- **Elasticsearch and Kibana calls** use the native `elasticsearch.request` and `kibana.request` step types. They take
+  their credential from the execution context of the workflow run, so there is no API key in the YAML and no
+  `Authorization` or `kbn-xsrf` header to write.
+- **Third-party APIs** use a Kibana connector. The step references the connector with `connector-id` at step level and
+  a path relative to the connector's base URL:
 
-# After
-consts:
-  virustotal_api_key: abcd1234efgh5678  # Your actual key
-  slack_webhook: https://hooks.slack.com/services/T00/B00/XXX
-```
+  ```yaml
+  - name: lookup_ip
+    type: http
+    connector-id: oputils-virustotal
+    with:
+      path: "/ip_addresses/{{ inputs.ip_address }}"
+      method: GET
+  ```
+
+  The API key lives in the connector's secrets in Kibana, never in the workflow YAML.
+
+`consts` remains available for non-secret values only (index names, agent ids, base URLs that carry no credential).
+**Never put an API key, token or password in `consts`.**
 
 ### 2. Update Elasticsearch Indices
 
-Modify index patterns for your environment:
-
-```yaml
-# Before
-with:
-  index: ".alerts-security*"
-
-# After (if using custom index)
-with:
-  index: "my-company-alerts-*"
-```
-
-### 3. Update Kibana URLs
-
-For workflows that make Kibana API calls:
+Index patterns are non-secret values, so they belong in `consts`:
 
 ```yaml
 consts:
-  kibana_url: https://your-kibana-instance.cloud.es.io
+  alerts_index: ".alerts-security*"
+```
+
+Or, for a step that takes the index inline:
+
+```yaml
+with:
+  path: "/my-company-alerts-*/_search"
+```
+
+### 3. Kibana URLs
+
+Kibana API calls use the native `kibana.request` step type, where the path is relative to the Kibana root, so no
+Kibana URL constant is needed:
+
+```yaml
+- name: add_comment
+  type: kibana.request
+  with:
+    method: POST
+    path: "/api/cases/{{ inputs.case_id }}/comments"
 ```
 
 ### 4. Adjust Schedules
@@ -437,19 +457,20 @@ Automate customization with sed:
 
 ```bash
 #!/bin/bash
-# customize.sh - Replace placeholders before import
+# customize.sh - Replace non-secret placeholders before import
+#
+# Credentials are never written into the workflow: ES/Kibana calls use the
+# execution context and third-party APIs use Kibana connectors.
 
 INPUT_FILE="$1"
 OUTPUT_FILE="$2"
 
 # Read environment variables or use defaults
-VT_KEY="${VIRUSTOTAL_KEY:-YOUR_VT_KEY}"
-SLACK_HOOK="${SLACK_WEBHOOK:-YOUR_SLACK_WEBHOOK}"
+ALERTS_INDEX="${ALERTS_INDEX:-.alerts-security*}"
 KIBANA="${KIBANA_URL:-https://your-kibana.example.com}"
 
 cat "$INPUT_FILE" | \
-  sed "s/API-KEY/${VT_KEY}/g" | \
-  sed "s|https://hooks.slack.com/.*|${SLACK_HOOK}|g" | \
+  sed "s|\.alerts-security\*|${ALERTS_INDEX}|g" | \
   sed "s|https://your-kibana-url|${KIBANA}|g" \
   > "$OUTPUT_FILE"
 
@@ -495,9 +516,10 @@ Error: 401 Unauthorized
 ```
 
 **Solution:** 
-- Verify API key is correct
-- Check API key has workflow permissions
-- Ensure `Authorization: ApiKey` header is correct
+- Verify the API key used for the import call is correct
+- Check that API key has workflow permissions
+- If a workflow step fails with 401, the step carries no credential of its own: check the execution context key's
+  permissions for `elasticsearch.request`/`kibana.request`, or the secrets of the connector referenced by `connector-id`
 
 #### 3b. Not Found Error (404)
 

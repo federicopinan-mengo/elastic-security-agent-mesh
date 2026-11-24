@@ -19,8 +19,17 @@ REQUIRED_AGENT_FIELDS = {"agent_name", "domain", "system_instructions", "tools"}
 REQUIRED_TOOL_FIELDS = {"name"}
 VALID_TOOL_TYPES = {"workflow", "builtin", "index_search", "mcp"}
 ROLE_TOOLSETS = {
-    "l1-triage-analyst.yaml": {"Bounded Alert Context", "Record L1 Investigation Result", "Dispatch Specialist"},
-    "l2-investigation-analyst.yaml": {"Get Investigation", "Semantic Knowledge Search", "Search Similar Investigations", "Add Evidence"},
+    "l1-triage-analyst.yaml": {
+        "Bounded Alert Context",
+        "Record L1 Investigation Result",
+        "Dispatch Specialist",
+    },
+    "l2-investigation-analyst.yaml": {
+        "Get Investigation",
+        "Semantic Knowledge Search",
+        "Search Similar Investigations",
+        "Add Evidence",
+    },
 }
 
 

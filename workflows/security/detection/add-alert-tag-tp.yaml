@@ -2,8 +2,9 @@
 # Workflow: Add Alert Tag - TP
 # Category: security/detection
 #
-# Tags a security alert as a true positive. Uses explicit HTTP auth to
-# work reliably when invoked through the agent mesh subagent chain.
+# Tags a security alert as a true positive. Uses the native
+# security.setAlertTags step, so it inherits the workflow execution
+# context instead of carrying its own credential.
 #
 # Author: Security Agent Mesh
 # =============================================================================
@@ -12,6 +13,7 @@ description: Tag a security alert as a true positive.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection
   - triage
@@ -28,21 +30,13 @@ inputs:
 steps:
 
   - name: set_tp_tag
-    type: http
+    type: security.setAlertTags
     with:
-      method: POST
-      url: "__KIBANA_URL__/api/detection_engine/signals/tags"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
-      body:
-        ids:
-          - "{{ inputs.alertid }}"
-        tags:
-          tags_to_add:
-            - "Triaged as True Positive by AI"
-          tags_to_remove: []
+      alert_ids:
+        - "{{ inputs.alertid }}"
+      tags_to_add:
+        - "Triaged as True Positive by AI"
+      tags_to_remove: []
 
   - name: confirm
     type: console

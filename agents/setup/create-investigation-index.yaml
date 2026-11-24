@@ -19,6 +19,7 @@ description: Create the investigation-contexts index for multi-agent investigati
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - setup
   - infrastructure
@@ -33,124 +34,119 @@ inputs:
     default: ".multilingual-e5-small-elasticsearch"
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   index_name: "investigation-contexts"
 
 steps:
 
   - name: check_index_exists
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ consts.index_name }}"
-      headers:
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ consts.index_name }}"
     on-failure:
+      fallback:
+
+        - name: create_index
+          type: elasticsearch.request
+          with:
+            method: PUT
+            path: "/{{ consts.index_name }}"
+            headers:
+              Content-Type: application/json
+            body:
+              settings:
+                number_of_shards: 1
+                number_of_replicas: 1
+              mappings:
+                properties:
+                  investigation_id:
+                    type: keyword
+                  trigger_type:
+                    type: keyword
+                  trigger_ref:
+                    type: keyword
+                  case_id:
+                    type: keyword
+                  status:
+                    type: keyword
+                  risk_tier:
+                    type: keyword
+                  assigned_agent:
+                    type: keyword
+                  title:
+                    type: text
+                  summary:
+                    type: text
+                  semantic_summary:
+                    type: semantic_text
+                    inference_id: "{{ inputs.inference_endpoint_id }}"
+                  evidence:
+                    type: nested
+                    properties:
+                      agent_id:
+                        type: keyword
+                      timestamp:
+                        type: date
+                      evidence_type:
+                        type: keyword
+                      content:
+                        type: text
+                      confidence:
+                        type: float
+                      references:
+                        type: keyword
+                  actions_taken:
+                    type: nested
+                    properties:
+                      agent_id:
+                        type: keyword
+                      action_type:
+                        type: keyword
+                      target:
+                        type: text
+                      timestamp:
+                        type: date
+                      approved_by:
+                        type: keyword
+                      result:
+                        type: text
+                      risk_tier:
+                        type: keyword
+                  pending_actions:
+                    type: nested
+                    properties:
+                      recommending_agent:
+                        type: keyword
+                      action_type:
+                        type: keyword
+                      risk_tier:
+                        type: keyword
+                      justification:
+                        type: text
+                      evidence_refs:
+                        type: keyword
+                  created_at:
+                    type: date
+                  updated_at:
+                    type: date
+                  resolved_at:
+                    type: date
+                  tags:
+                    type: keyword
+
+        - name: confirm_creation
+          type: console
+          with:
+            message: >-
+              Investigation contexts index created with semantic search and
+              nested evidence tracking.
       continue: true
 
-  - name: create_or_skip
-    type: if
-    condition: 'steps.check_index_exists.status: "success"'
-    steps:
 
-      - name: already_exists
-        type: console
-        with:
-          message: "Index {{ consts.index_name }} already exists. Skipping creation."
-
-    else:
-
-      - name: create_index
-        type: http
-        with:
-          method: PUT
-          url: "{{ consts.es_url }}/{{ consts.index_name }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
-          body:
-            settings:
-              number_of_shards: 1
-              number_of_replicas: 1
-            mappings:
-              properties:
-                investigation_id:
-                  type: keyword
-                trigger_type:
-                  type: keyword
-                trigger_ref:
-                  type: keyword
-                case_id:
-                  type: keyword
-                status:
-                  type: keyword
-                risk_tier:
-                  type: keyword
-                assigned_agent:
-                  type: keyword
-                title:
-                  type: text
-                summary:
-                  type: text
-                semantic_summary:
-                  type: semantic_text
-                  inference_id: "{{ inputs.inference_endpoint_id }}"
-                evidence:
-                  type: nested
-                  properties:
-                    agent_id:
-                      type: keyword
-                    timestamp:
-                      type: date
-                    evidence_type:
-                      type: keyword
-                    content:
-                      type: text
-                    confidence:
-                      type: float
-                    references:
-                      type: keyword
-                actions_taken:
-                  type: nested
-                  properties:
-                    agent_id:
-                      type: keyword
-                    action_type:
-                      type: keyword
-                    target:
-                      type: text
-                    timestamp:
-                      type: date
-                    approved_by:
-                      type: keyword
-                    result:
-                      type: text
-                    risk_tier:
-                      type: keyword
-                pending_actions:
-                  type: nested
-                  properties:
-                    recommending_agent:
-                      type: keyword
-                    action_type:
-                      type: keyword
-                    risk_tier:
-                      type: keyword
-                    justification:
-                      type: text
-                    evidence_refs:
-                      type: keyword
-                created_at:
-                  type: date
-                updated_at:
-                  type: date
-                resolved_at:
-                  type: date
-                tags:
-                  type: keyword
-
-      - name: confirm_creation
-        type: console
-        with:
-          message: "Investigation contexts index created with semantic search and nested evidence tracking."
+  - name: report_index_state
+    type: console
+    with:
+      message: |-
+        {% if steps.check_index_exists.output %}
+        Index {{ consts.index_name }} already exists.
+        {% endif %}

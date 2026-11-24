@@ -17,6 +17,7 @@ description: Update an existing document in any Elasticsearch index by ID (parti
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - data
   - knowledge
@@ -38,25 +39,20 @@ inputs:
     description: Partial document body — only the fields provided will be updated
     required: true
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
-
 steps:
 
   - name: update_document
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ inputs.index_name }}/_update/{{ inputs.document_id }}"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ inputs.index_name }}/_update/{{ inputs.document_id }}"
       body:
         doc: "{{ inputs.document }}"
 
   - name: confirm
     type: console
     with:
-      message: "Document {{ inputs.document_id }} updated in {{ inputs.index_name }} (result: {{ steps.update_document.output.data.result }})"
+      message: >-
+        Document {{ inputs.document_id }} updated in {{ inputs.index_name }}
+        (result: {{ steps.update_document.output.result }})
 

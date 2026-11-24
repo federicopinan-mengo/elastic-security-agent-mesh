@@ -18,6 +18,7 @@ description: Scheduled aggregation of TP/FP ratios per detection rule for qualit
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - feedback
   - detection-engineering
@@ -34,21 +35,16 @@ inputs:
     default: 30
 
 consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
   alerts_index: ".alerts-security.alerts-default"
   kb_index: "kb-detection-rules"
 
 steps:
 
   - name: query_tp_counts
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -68,13 +64,10 @@ steps:
       continue: true
 
   - name: query_fp_counts
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -94,13 +87,10 @@ steps:
       continue: true
 
   - name: query_total_counts
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.alerts_index }}/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.alerts_index }}/_search
       body:
         size: 0
         query:
@@ -114,20 +104,17 @@ steps:
               size: 500
 
   - name: write_feedback_summary
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "{{ consts.es_url }}/{{ consts.kb_index }}/_doc"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: /{{ consts.kb_index }}/_doc
       body:
         title: "Detection Feedback Summary — {{ 'now' | date: '%Y-%m-%d' }}"
         content: |
           Automated detection quality feedback aggregated over the last {{ inputs.lookback_days }} days.
-          Total rules with alerts: {{ steps.query_total_counts.output.data.aggregations.by_rule.buckets | size }}
-          Rules with TP tags: {{ steps.query_tp_counts.output.data.aggregations.by_rule.buckets | size }}
-          Rules with FP tags: {{ steps.query_fp_counts.output.data.aggregations.by_rule.buckets | size }}
+          Total rules with alerts: {{ steps.query_total_counts.output.aggregations.by_rule.buckets | size }}
+          Rules with TP tags: {{ steps.query_tp_counts.output.aggregations.by_rule.buckets | size }}
+          Rules with FP tags: {{ steps.query_fp_counts.output.aggregations.by_rule.buckets | size }}
         semantic_summary: "Detection rule quality feedback showing true positive and false positive rates per rule for the last {{ inputs.lookback_days }} days"
         category: "feedback"
         source: "aggregate-detection-feedback"
@@ -140,9 +127,9 @@ steps:
         expires_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' | plus: 2592000 }}"
         metadata:
           lookback_days: "{{ inputs.lookback_days }}"
-          tp_buckets: "{{ steps.query_tp_counts.output.data.aggregations.by_rule.buckets }}"
-          fp_buckets: "{{ steps.query_fp_counts.output.data.aggregations.by_rule.buckets }}"
-          total_buckets: "{{ steps.query_total_counts.output.data.aggregations.by_rule.buckets }}"
+          tp_buckets: "{{ steps.query_tp_counts.output.aggregations.by_rule.buckets }}"
+          fp_buckets: "{{ steps.query_fp_counts.output.aggregations.by_rule.buckets }}"
+          total_buckets: "{{ steps.query_total_counts.output.aggregations.by_rule.buckets }}"
 
   - name: confirm
     type: console

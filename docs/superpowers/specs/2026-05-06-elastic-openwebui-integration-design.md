@@ -1,5 +1,9 @@
 # Elastic + OpenWebUI Integration Design
 
+> **Estado: NO IMPLEMENTADO — ningún runtime depende de esto.**
+> This is a design record for a feature that is not implemented in this repository. The Python tools described below
+> were removed; no setup script, CI job, workflow or test references OpenWebUI.
+
 ## Context
 
 User wants to use OpenWebUI as a unified chat interface to query Elastic data (Fleet agents, security alerts, logs, observability metrics) in natural language. The LLM decides which tool to invoke and constructs the ES|QL query dynamically based on the user's question.

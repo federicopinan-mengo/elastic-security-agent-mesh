@@ -12,6 +12,7 @@ description: List Elastic Security detection rules with optional filters.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection-engineering
 
@@ -43,16 +44,21 @@ inputs:
 steps:
 
   - name: list_rules
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/api/detection_engine/rules/_find?page={{ inputs.page }}&per_page={{ inputs.per_page }}&sort_field={{ inputs.sort_field }}&sort_order={{ inputs.sort_order }}{% if inputs.search %}&filter=alert.attributes.name:%20{{ inputs.search }}{% endif %}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/api/detection_engine/rules/_find"
+      query:
+        page: "{{ inputs.page }}"
+        per_page: "{{ inputs.per_page }}"
+        sort_field: "{{ inputs.sort_field }}"
+        sort_order: "{{ inputs.sort_order }}"
+        filter: "{% if inputs.search %}alert.attributes.name: {{ inputs.search
+          }}{% endif %}"
 
   - name: output_summary
     type: console
     with:
-      message: |
-        Found {{ steps.list_rules.output.data.total }} rules (showing page {{ inputs.page }}, {{ inputs.per_page }} per page)
+      message: "Found {{ steps.list_rules.output.total }} rules (showing page {{
+        inputs.page }}, {{ inputs.per_page }} per page)\n\
+        "

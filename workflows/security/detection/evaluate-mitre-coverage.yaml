@@ -9,10 +9,12 @@
 # Author: Security Agent Mesh
 # =============================================================================
 name: Evaluate MITRE Coverage
-description: Identify gaps in MITRE ATT&CK technique coverage across detection rules.
+description: "Identify gaps in MITRE ATT&CK technique coverage across detection
+  rules."
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection-engineering
   - mitre
@@ -23,40 +25,44 @@ triggers:
 inputs:
   - name: enabled_only
     type: boolean
-    description: "Only evaluate enabled rules (recommended for production coverage)"
+    description: "Only evaluate enabled rules (recommended for production
+      coverage)"
     default: true
   - name: tactic_filter
     type: string
-    description: "Filter to a specific tactic (e.g., 'Initial Access', 'Execution'). Leave empty for all."
+    description: "Filter to a specific tactic (e.g., 'Initial Access',
+      'Execution'). Leave empty for all."
     required: false
 
 steps:
 
   - name: fetch_all_rules
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/api/detection_engine/rules/_find?per_page=1000&sort_field=name&sort_order=asc"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/api/detection_engine/rules/_find"
+      query:
+        per_page: 1000
+        sort_field: name
+        sort_order: asc
 
   - name: extract_coverage
     type: console
     with:
       message: |
-        {% assign rules = steps.fetch_all_rules.output.data.data %}
-        {% assign total_rules = steps.fetch_all_rules.output.data.total %}
-        {% assign covered_techniques = "" | split: "" %}
+        {%- assign enabled = inputs.enabled_only == true -%}
+        {% assign rules = steps.fetch_all_rules.output.data %}
+        {% assign total_rules = steps.fetch_all_rules.output.total %}
+        {% assign covered = "" | split: "" %}
         {% assign covered_count = 0 %}
         {% for rule in rules %}
-          {% if inputs.enabled_only == true and rule.enabled == false %}{% continue %}{% endif %}
+          {% if enabled and rule.enabled == false %}{% continue %}{% endif %}
           {% if rule.threat %}
             {% for threat in rule.threat %}
               {% if threat.technique %}
                 {% for technique in threat.technique %}
-                  {% unless covered_techniques contains technique.id %}
-                    {% assign covered_techniques = covered_techniques | push: technique.id %}
+                  {% unless covered contains technique.id %}
+                    {% assign covered = covered | push: technique.id %}
                     {% assign covered_count = covered_count | plus: 1 %}
                   {% endunless %}
                 {% endfor %}
@@ -66,16 +72,13 @@ steps:
         {% endfor %}
         Total rules: {{ total_rules }}
         Unique MITRE techniques covered: {{ covered_count }}
-        Techniques: {{ covered_techniques | join: ", " }}
+        Techniques: {{ covered | join: ", " }}
 
   - name: search_kb_techniques
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "__ES_URL__/kb-mitre-attack/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __ES_API_KEY__"
+      path: "/kb-mitre-attack/_search"
       body:
         size: 0
         track_total_hits: true
@@ -88,8 +91,12 @@ steps:
     type: console
     with:
       message: |
+        {%- assign total_rules = steps.fetch_all_rules.output.total -%}
+        {%- assign kb_hits = steps.search_kb_techniques.output.hits -%}
+        {%- assign kb_total = kb_hits.total.value -%}
+        {%- assign tactic = inputs.tactic_filter -%}
         === MITRE ATT&CK Coverage Report ===
-        Total detection rules evaluated: {{ steps.fetch_all_rules.output.data.total }}
+        Total detection rules evaluated: {{ total_rules }}
         Enabled only: {{ inputs.enabled_only }}
-        {% if inputs.tactic_filter %}Tactic filter: {{ inputs.tactic_filter }}{% endif %}
-        Total techniques in KB: {{ steps.search_kb_techniques.output.data.hits.total.value }}
+        {% if tactic %}Tactic filter: {{ tactic }}{% endif %}
+        Total techniques in KB: {{ kb_total }}

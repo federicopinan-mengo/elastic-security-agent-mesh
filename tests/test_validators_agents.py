@@ -1,16 +1,14 @@
 import sys
 from pathlib import Path
 
+import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import pytest
-import yaml
-
-from scripts.validators.agents import ROLE_TOOLSETS, validate_agent_yaml
-
+from scripts.validators.agents import ROLE_TOOLSETS, validate_agent_yaml  # noqa: E402
 
 DEFINITIONS = ROOT / "agents" / "definitions"
 

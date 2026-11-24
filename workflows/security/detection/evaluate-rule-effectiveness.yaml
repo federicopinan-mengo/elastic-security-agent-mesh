@@ -9,10 +9,12 @@
 # Author: Security Agent Mesh
 # =============================================================================
 name: Evaluate Rule Effectiveness
-description: Get execution metrics and alert counts for a detection rule to assess its effectiveness.
+description: "Get execution metrics and alert counts for a detection rule to
+  assess its effectiveness."
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection-engineering
 
@@ -28,29 +30,25 @@ inputs:
 steps:
 
   - name: get_rule
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/api/detection_engine/rules?rule_id={{ inputs.rule_id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/api/detection_engine/rules"
+      query:
+        rule_id: "{{ inputs.rule_id }}"
 
   - name: get_alerts_for_rule
-    type: http
+    type: elasticsearch.request
     with:
       method: POST
-      url: "__ES_URL__/.alerts-security.alerts-*/_search"
-      headers:
-        Content-Type: application/json
-        Authorization: "ApiKey __ES_API_KEY__"
+      path: "/.alerts-security.alerts-*/_search"
       body:
         size: 0
         query:
           bool:
             must:
               - term:
-                  kibana.alert.rule.uuid: "{{ steps.get_rule.output.data.id }}"
+                  kibana.alert.rule.uuid: "{{ steps.get_rule.output.id }}"
         aggs:
           by_status:
             terms:
@@ -72,32 +70,41 @@ steps:
               size: 10
 
   - name: get_execution_log
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/internal/detection_engine/rules/{{ steps.get_rule.output.data.id }}/_execution_results?start=now-7d&end=now&per_page=100&sort_field=timestamp&sort_order=desc"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/internal/detection_engine/rules/{{ steps.get_rule.output.id
+        }}/_execution_results"
+      query:
+        start: "now-7d"
+        end: "now"
+        per_page: 100
+        sort_field: timestamp
+        sort_order: desc
 
   - name: output_report
     type: console
     with:
-      message: |
-        === Rule Effectiveness Report ===
-        Rule: {{ steps.get_rule.output.data.name }}
-        Rule ID: {{ steps.get_rule.output.data.rule_id }}
-        Type: {{ steps.get_rule.output.data.type }} ({{ steps.get_rule.output.data.language }})
-        Severity: {{ steps.get_rule.output.data.severity }}
-        Enabled: {{ steps.get_rule.output.data.enabled }}
-        Interval: {{ steps.get_rule.output.data.interval }}
-
-        === Alert Summary ===
-        Total alerts: {{ steps.get_alerts_for_rule.output.data.hits.total.value }}
-        By status: {{ steps.get_alerts_for_rule.output.data.aggregations.by_status.buckets }}
-        By severity: {{ steps.get_alerts_for_rule.output.data.aggregations.by_severity.buckets }}
-        Top hosts: {{ steps.get_alerts_for_rule.output.data.aggregations.by_host.buckets }}
-        Top source IPs: {{ steps.get_alerts_for_rule.output.data.aggregations.by_source_ip.buckets }}
-
-        === Execution Log (last 7 days) ===
-        {{ steps.get_execution_log.output.data }}
+      message: "=== Rule Effectiveness Report ===\n\
+        Rule: {{ steps.get_rule.output.name }}\n\
+        Rule ID: {{ steps.get_rule.output.rule_id }}\n\
+        Type: {{ steps.get_rule.output.type }} ({{
+        steps.get_rule.output.language }})\n\
+        Severity: {{ steps.get_rule.output.severity }}\n\
+        Enabled: {{ steps.get_rule.output.enabled }}\n\
+        Interval: {{ steps.get_rule.output.interval }}\n\
+        \n\
+        === Alert Summary ===\n\
+        Total alerts: {{ steps.get_alerts_for_rule.output.hits.total.value }}\n\
+        By status: {{
+        steps.get_alerts_for_rule.output.aggregations.by_status.buckets }}\n\
+        By severity: {{
+        steps.get_alerts_for_rule.output.aggregations.by_severity.buckets }}\n\
+        Top hosts: {{
+        steps.get_alerts_for_rule.output.aggregations.by_host.buckets }}\n\
+        Top source IPs: {{
+        steps.get_alerts_for_rule.output.aggregations.by_source_ip.buckets }}\n\
+        \n\
+        === Execution Log (last 7 days) ===\n\
+        {{ steps.get_execution_log.output }}\n\
+        "

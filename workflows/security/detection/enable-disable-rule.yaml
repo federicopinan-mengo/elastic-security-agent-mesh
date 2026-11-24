@@ -5,9 +5,9 @@
 # Toggles a detection rule's enabled status. Enabling is a Tier 2
 # governance action — the agent should check governance policy first.
 #
-# Uses if-branches to set the enabled field as a native YAML boolean
-# (Liquid renders everything as strings, and the API rejects string
-# values for the enabled field).
+# Branches into security.enableRule / security.disableRule, which take the
+# rule UUID and apply the state change server-side. The rule UUID is
+# resolved first because these steps take ids, not rule_id.
 #
 # Accepts either rule_id (slug) or saved object id (UUID).
 #
@@ -18,6 +18,7 @@ description: Toggle a detection rule on or off by rule_id.
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - detection-engineering
 
@@ -27,7 +28,8 @@ triggers:
 inputs:
   - name: rule_id
     type: string
-    description: "The rule_id (slug) or saved object id (UUID) of the detection rule"
+    description: "The rule_id (slug) or saved object id (UUID) of the detection
+      rule"
     required: true
   - name: enabled
     type: string
@@ -38,25 +40,23 @@ steps:
 
   # Look up the rule to get its saved object ID (needed for PATCH)
   - name: try_by_rule_id
-    type: http
+    type: kibana.request
     with:
       method: GET
-      url: "__KIBANA_URL__/api/detection_engine/rules?rule_id={{ inputs.rule_id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/api/detection_engine/rules"
+      query:
+        rule_id: "{{ inputs.rule_id }}"
     on-failure:
       continue: true
 
   - name: try_by_uuid
-    type: http
+    type: kibana.request
     condition: "{{ steps.try_by_rule_id.error != null }}"
     with:
       method: GET
-      url: "__KIBANA_URL__/api/detection_engine/rules?id={{ inputs.rule_id }}"
-      headers:
-        Authorization: "ApiKey __KIBANA_API_KEY__"
-        kbn-xsrf: "true"
+      path: "/api/detection_engine/rules"
+      query:
+        id: "{{ inputs.rule_id }}"
     on-failure:
       continue: true
 
@@ -66,17 +66,11 @@ steps:
     condition: 'inputs.enabled: "true"'
     steps:
       - name: enable_rule
-        type: http
+        type: security.enableRule
         with:
-          method: PATCH
-          url: "__KIBANA_URL__/api/detection_engine/rules"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
-          body:
-            id: "{{ steps.try_by_uuid.output.data.id | default: steps.try_by_rule_id.output.data.id }}"
-            enabled: true
+          ids:
+            - "{{ steps.try_by_uuid.output.id | default:
+              steps.try_by_rule_id.output.id }}"
         on-failure:
           continue: true
 
@@ -86,25 +80,24 @@ steps:
     condition: 'inputs.enabled: "false"'
     steps:
       - name: disable_rule
-        type: http
+        type: security.disableRule
         with:
-          method: PATCH
-          url: "__KIBANA_URL__/api/detection_engine/rules"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey __KIBANA_API_KEY__"
-            kbn-xsrf: "true"
-          body:
-            id: "{{ steps.try_by_uuid.output.data.id | default: steps.try_by_rule_id.output.data.id }}"
-            enabled: false
+          ids:
+            - "{{ steps.try_by_uuid.output.id | default:
+              steps.try_by_rule_id.output.id }}"
         on-failure:
           continue: true
 
   - name: confirm
     type: console
     with:
-      message: |
-        {% assign result = steps.branch_enable.steps.enable_rule.output.data | default: steps.branch_disable.steps.disable_rule.output.data %}
-        Rule {{ inputs.rule_id }}: {% if inputs.enabled == "true" %}ENABLED{% else %}DISABLED{% endif %}
-        Name: {{ result.name }}
-        ID: {{ result.id }}
+      message: "{% assign rule = steps.try_by_uuid.output | default:
+        steps.try_by_rule_id.output %}\n\
+        {% assign changed = steps.branch_enable.steps.enable_rule.output
+        | default: steps.branch_disable.steps.disable_rule.output %}\n\
+        Rule {{ inputs.rule_id }}: {% if inputs.enabled == \"true\" %}ENABLED{%
+        else %}DISABLED{% endif %}\n\
+        Name: {{ rule.name }}\n\
+        ID: {{ rule.id }}\n\
+        Updated: {{ changed.succeeded | default: 0 }} rule(s)\n\
+        "

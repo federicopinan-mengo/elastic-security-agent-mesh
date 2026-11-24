@@ -35,8 +35,8 @@ jobs:
       - name: Validate Agent Registry references
         run: python -m scripts.validators.references
 
-  test-setup:
-    name: Test setup.py
+  test:
+    name: Run test suite
     runs-on: ubuntu-latest
 
     steps:
@@ -49,10 +49,10 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install pytest requests pyyaml
+        run: pip install pytest requests pyyaml python-dotenv
 
       - name: Run unit tests
-        run: pytest tests/test_setup.py -v
+        run: python -m pytest tests/ -v
 
   lint:
     name: Lint Python
@@ -71,7 +71,9 @@ jobs:
         run: pip install ruff
 
       - name: Run Ruff linter
-        run: ruff check scripts/setup.py scripts/seed_*.py
+        run: ruff check scripts/setup.py scripts/auth.py scripts/seed_*.py
 
       - name: Run Ruff formatter check
-        run: ruff format --check scripts/setup.py scripts/seed_*.py
+        run: >
+          ruff format --check
+          scripts/setup.py scripts/auth.py scripts/seed_*.py

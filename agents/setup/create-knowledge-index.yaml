@@ -26,6 +26,7 @@ description: Create an Elasticsearch index with semantic search support for the 
 enabled: true
 
 tags:
+  - oputils-mesh
   - agent-mesh
   - setup
   - infrastructure
@@ -51,72 +52,62 @@ inputs:
     description: Number of replica shards
     default: 1
 
-consts:
-  es_url: "__ES_URL__"
-  es_api_key: "__ES_API_KEY__"
 
 steps:
 
   - name: check_index_exists
-    type: http
+    type: elasticsearch.request
     with:
       method: GET
-      url: "{{ consts.es_url }}/{{ inputs.index_name }}"
-      headers:
-        Authorization: "ApiKey {{ consts.es_api_key }}"
+      path: "/{{ inputs.index_name }}"
     on-failure:
+      fallback:
+        - name: create_index
+          type: elasticsearch.request
+          with:
+            method: PUT
+            path: "/{{ inputs.index_name }}"
+            headers:
+              Content-Type: application/json
+            body:
+              settings:
+                number_of_shards: "{{ inputs.number_of_shards }}"
+                number_of_replicas: "{{ inputs.number_of_replicas }}"
+              mappings:
+                properties:
+                  title:
+                    type: text
+                  content:
+                    type: text
+                  semantic_summary:
+                    type: semantic_text
+                    inference_id: "{{ inputs.inference_endpoint_id }}"
+                  category:
+                    type: keyword
+                  source:
+                    type: keyword
+                  tags:
+                    type: keyword
+                  created_at:
+                    type: date
+                  updated_at:
+                    type: date
+                  expires_at:
+                    type: date
+                  metadata:
+                    type: object
+                    dynamic: true
+        - name: confirm_creation
+          type: console
+          with:
+            message: "Index {{ inputs.index_name }} created with semantic_text field using inference endpoint: {{ inputs.inference_endpoint_id }}"
       continue: true
 
-  - name: create_or_skip
-    type: if
-    condition: 'steps.check_index_exists.status: "success"'
-    steps:
 
-      - name: already_exists
-        type: console
-        with:
-          message: "Index {{ inputs.index_name }} already exists. Skipping creation."
-
-    else:
-
-      - name: create_index
-        type: http
-        with:
-          method: PUT
-          url: "{{ consts.es_url }}/{{ inputs.index_name }}"
-          headers:
-            Content-Type: application/json
-            Authorization: "ApiKey {{ consts.es_api_key }}"
-          body:
-            settings:
-              number_of_shards: "{{ inputs.number_of_shards }}"
-              number_of_replicas: "{{ inputs.number_of_replicas }}"
-            mappings:
-              properties:
-                title:
-                  type: text
-                content:
-                  type: text
-                semantic_summary:
-                  type: semantic_text
-                  inference_id: "{{ inputs.inference_endpoint_id }}"
-                category:
-                  type: keyword
-                source:
-                  type: keyword
-                tags:
-                  type: keyword
-                created_at:
-                  type: date
-                updated_at:
-                  type: date
-                expires_at:
-                  type: date
-                metadata:
-                  type: object
-                  dynamic: true
-
-      - name: confirm_creation
-        type: console
-        with:
-          message: "Index {{ inputs.index_name }} created with semantic_text field using inference endpoint: {{ inputs.inference_endpoint_id }}"
+  - name: report_index_state
+    type: console
+    with:
+      message: |-
+        {% if steps.check_index_exists.output %}
+        Index {{ inputs.index_name }} already exists.
+        {% endif %}
