@@ -90,6 +90,14 @@ The default on a failed step is to abort the workflow. `on-failure` can be confi
 
 Use retries only for transient failures; condition them on errors such as HTTP 429 or 5xx. Do not use `continue: true` for a mutation whose success is required by later logic. A workflow that must survive a failed mutation should use an explicit fallback or a separate `workflows.failed` handler and must record the failure as such.
 
+`on-failure.fallback` takes a list of alternative steps that run when the step fails, and `on-failure.continue` keeps the workflow going after them. Together they are the way to express "do this when the other thing did not work": the index bootstrap creates the index in the fallback of the check that failed.
+
+### What a condition can read
+
+A step is exposed to the rest of the workflow as `{input, output, error}`. There is no per step status, so a condition on `steps.<name>.status` reads a missing field and never matches. The status values of the engine (`pending`, `waiting`, `running`, `completed`, `failed`, `cancelled`, `timed_out`, `skipped`, and the waiting variants) are not part of the step context.
+
+Conditions are evaluated with Kibana Query Language over that context, and the `if` step reads the same thing. Branch on what a step produced, on its `error`, or on the outcome of the call it made, never on a status that the context does not carry. `tests/test_workflow_guards.py` fails when a workflow guards a branch on a step status.
+
 ### Human approval
 
 Use `waitForApproval` for binary human authorization. It pauses execution and returns a structured approval result, including `response.approved` and `respondedBy`. The mutation must be guarded by the approval result; a rejection does not automatically stop subsequent steps.
@@ -140,9 +148,9 @@ Kibana 9.5.7 fixes rules that a workflow edits with your own API key failing wit
 
 ### Migration left for a later increment
 
-1. The five case workflows (`createcasetool`, `get-case-details`, `update-case-status`, `add-case-comment`, `add-alert-to-case`) still call `/api/cases` through `kibana.request`. The `cases.*` steps are the typed equivalent, but their per-step output shape is not documented, so they are not converted yet.
-2. `approval-monitor.yaml` polls case comments to learn the outcome of an approval; a case trigger delivers the same event natively.
-3. The mesh keeps its own `approval-requests` index instead of `waitForApproval`, which is still Preview on the Stack.
+1. `approval-monitor.yaml` polls case comments to learn the outcome of an approval; a case trigger delivers the same event natively. The case triggers are Preview on the Stack, so the monitor keeps the poll and now decides over the whole comment history instead of the newest comment.
+2. The mesh keeps its own `approval-requests` index instead of `waitForApproval`, which is still Preview on the Stack.
+3. `cases.commentsAdded` would also deliver the approval comment itself, which the poll has to look for.
 
 ### Revalidate on every upgrade
 
