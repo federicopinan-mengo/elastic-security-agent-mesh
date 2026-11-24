@@ -58,9 +58,7 @@ def test_approval_monitor_decision_ignores_a_negative_approval():
 
 def test_approval_monitor_conditions_read_the_decision_token():
     workflow = load()
-    conditions = [
-        step.get("condition", "") for step in all_steps(workflow) if step["type"] == "if"
-    ]
+    conditions = [step.get("condition", "") for step in all_steps(workflow) if step["type"] == "if"]
     decision_conditions = [c for c in conditions if "decide_approval" in c]
     assert len(decision_conditions) >= 3
     assert not [c for c in conditions if "latest_comment_text" in c]

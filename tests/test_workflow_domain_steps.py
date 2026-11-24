@@ -47,6 +47,7 @@ def all_steps(workflow):
     walk(workflow.get("steps", []))
     return found
 
+
 def find_step(workflow, name):
     for step in all_steps(workflow):
         if step["name"] == name:

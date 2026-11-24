@@ -37,60 +37,60 @@ steps:
       method: GET
       path: "/{{ consts.index_name }}"
     on-failure:
+      fallback:
+
+        - name: create_index
+          type: elasticsearch.request
+          with:
+            method: PUT
+            path: "/{{ consts.index_name }}"
+            headers:
+              Content-Type: application/json
+            body:
+              settings:
+                number_of_shards: 1
+                number_of_replicas: 1
+              mappings:
+                properties:
+                  action_type:
+                    type: keyword
+                  risk_tier:
+                    type: keyword
+                  allowed_callers:
+                    type: keyword
+                  auto_approve:
+                    type: object
+                    properties:
+                      min_confidence:
+                        type: float
+                      max_blast_radius:
+                        type: integer
+                      required_evidence_count:
+                        type: integer
+                  requires_approval:
+                    type: boolean
+                  approval_channel:
+                    type: keyword
+                  rollback_workflow:
+                    type: keyword
+                  ttl_minutes:
+                    type: integer
+                  description:
+                    type: text
+
+        - name: confirm_creation
+          type: console
+          with:
+            message: >-
+              Action policies index created. Seed with default policies using
+              the setup script.
       continue: true
 
-  - name: create_or_skip
-    type: if
-    condition: 'steps.check_index_exists.status: "success"'
-    steps:
 
-      - name: already_exists
-        type: console
-        with:
-          message: "Index {{ consts.index_name }} already exists. Skipping creation."
-
-    else:
-
-      - name: create_index
-        type: elasticsearch.request
-        with:
-          method: PUT
-          path: "/{{ consts.index_name }}"
-          headers:
-            Content-Type: application/json
-          body:
-            settings:
-              number_of_shards: 1
-              number_of_replicas: 1
-            mappings:
-              properties:
-                action_type:
-                  type: keyword
-                risk_tier:
-                  type: keyword
-                allowed_callers:
-                  type: keyword
-                auto_approve:
-                  type: object
-                  properties:
-                    min_confidence:
-                      type: float
-                    max_blast_radius:
-                      type: integer
-                    required_evidence_count:
-                      type: integer
-                requires_approval:
-                  type: boolean
-                approval_channel:
-                  type: keyword
-                rollback_workflow:
-                  type: keyword
-                ttl_minutes:
-                  type: integer
-                description:
-                  type: text
-
-      - name: confirm_creation
-        type: console
-        with:
-          message: "Action policies index created. Seed with default policies using the setup script."
+  - name: report_index_state
+    type: console
+    with:
+      message: |-
+        {% if steps.check_index_exists.output %}
+        Index {{ consts.index_name }} already exists.
+        {% endif %}
