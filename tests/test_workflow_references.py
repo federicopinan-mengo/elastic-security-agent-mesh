@@ -70,8 +70,7 @@ def test_a_field_is_always_reached_through_the_same_path():
     """
     for path in workflow_files():
         text = "\n".join(
-            line for line in path.read_text().splitlines()
-            if not line.lstrip().startswith("#")
+            line for line in path.read_text().splitlines() if not line.lstrip().startswith("#")
         )
         per_field = {}
         for match in OUTPUT_REF.finditer(text):
@@ -94,9 +93,7 @@ def test_the_threat_assessment_reads_the_same_score_it_reports():
     reported = re.search(
         r"Abuse Confidence Score: \{\{ steps\.check_abuseipdb\.output\.([\w.]+) \}\}", text
     )
-    assessed = re.search(
-        r"\{% assign (\w+) = steps\.check_abuseipdb\.output\.([\w.]+) %\}", text
-    )
+    assessed = re.search(r"\{% assign (\w+) = steps\.check_abuseipdb\.output\.([\w.]+) %\}", text)
     assert reported and assessed, "the workflow must report and assess the score"
     alias, root = assessed.group(1), assessed.group(2)
     assert f"{alias}.abuseConfidenceScore" in text, "the condition must read the score"

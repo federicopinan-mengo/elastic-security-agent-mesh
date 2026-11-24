@@ -20,7 +20,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 def load_dotenv(path=".env"):
@@ -84,7 +84,7 @@ def api_request(method, path, body=None):
 def save_credentials(project_id, project_name, credentials, endpoints):
     """Append credentials to .elastic-credentials in the working directory."""
     creds_file = os.path.join(os.getcwd(), ".elastic-credentials")
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     fd = os.open(creds_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
     os.fchmod(fd, 0o600)
     with os.fdopen(fd, "a") as f:
