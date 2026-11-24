@@ -160,22 +160,18 @@ steps:
                     attempts.
 
               - name: notify_failure_on_case
-                type: kibana.request
+                type: cases.addComment
                 on-failure:
                   continue: true
                 with:
-                  method: POST
-                  path: /api/cases/{{ foreach.item._source.case_id }}/comments
-                  body:
-                    type: "user"
-                    comment: |
+                  case_id: "{{ foreach.item._source.case_id }}"
+                  comment: |
                       ## Agent Dispatch Failed After 3 Attempts
 
                       **Dispatch ID:** {{ foreach.item._source.dispatch_id }}
                       **Target Agent:** {{ foreach.item._source.target_agent }}
 
                       The agent call failed 3 times (likely due to repeated timeouts or model errors). A human may need to investigate manually or retry by setting the dispatch status back to "pending" in the dispatch-requests index.
-                    owner: "securitySolution"
 
             else:
 

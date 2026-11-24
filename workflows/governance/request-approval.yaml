@@ -87,13 +87,10 @@ steps:
         created_at: "{{ 'now' | date: '%Y-%m-%dT%H:%M:%SZ' }}"
 
   - name: add_approval_comment
-    type: kibana.request
+    type: cases.addComment
     with:
-      method: POST
-      path: /api/cases/{{ inputs.case_id }}/comments
-      body:
-        type: "user"
-        comment: |
+      case_id: "{{ inputs.case_id }}"
+      comment: |
           ## Tier 2 Action — Human Approval Required
 
           **Approval ID:** {{ steps.generate_approval_id.output }}
@@ -116,7 +113,6 @@ steps:
           **To deny:** Reply with a comment containing **DENIED** and the reason
 
           The approval monitor checks every 2 minutes. Once you respond, the action will be dispatched automatically.
-        owner: "securitySolution"
 
   - name: confirm
     type: console

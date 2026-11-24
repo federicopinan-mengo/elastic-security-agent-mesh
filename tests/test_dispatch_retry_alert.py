@@ -53,11 +53,11 @@ class TestExhaustedRetryAlert:
         alerts = [
             step
             for step in iter_steps(exhausted.get("steps", []))
-            if step.get("type") == "kibana.request"
-            and "/api/cases/" in str(step.get("with", {}).get("path", ""))
+            if step.get("type") == "cases.addComment"
         ]
-        assert alerts, "no kibana.request alert against /api/cases/ in the exhausted branch"
-        assert all(alert["with"]["path"].rstrip("/").endswith("/comments") for alert in alerts)
+        assert alerts, "no cases.addComment alert in the exhausted branch"
+        assert all(alert["with"]["case_id"] for alert in alerts)
+        assert all("comment" in alert["with"] for alert in alerts)
 
     def test_exhaustion_is_decided_on_persisted_state(self):
         """The branch must not decide exhaustion from the pre-update snapshot."""

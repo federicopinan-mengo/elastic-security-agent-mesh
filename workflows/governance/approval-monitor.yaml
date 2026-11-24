@@ -208,15 +208,12 @@ steps:
                       execution_result: "Dispatch request queued for {{ foreach.item._source.target_agent }}."
 
               - name: add_executed_comment
-                type: kibana.request
+                type: cases.addComment
                 on-failure:
                   continue: true
                 with:
-                  method: POST
-                  path: /api/cases/{{ foreach.item._source.case_id }}/comments
-                  body:
-                    type: "user"
-                    comment: |
+                  case_id: "{{ foreach.item._source.case_id }}"
+                  comment: |
                       ## Action Approved and Dispatched
 
                       **Approval ID:** {{ foreach.item._source.approval_id }}
@@ -224,7 +221,6 @@ steps:
                       **Dispatched to:** {{ foreach.item._source.target_agent }}
 
                       The approved action has been queued for dispatch. The dispatch monitor will invoke the agent within 1 minute. Results will be posted as follow-up comments.
-                    owner: "securitySolution"
 
             else:
 
@@ -251,23 +247,18 @@ steps:
                           resolved_by: "human"
 
                   - name: add_denied_comment
-                    type: kibana.request
+                    type: cases.addComment
                     on-failure:
                       continue: true
                     with:
-                      method: POST
-                      path: >-
-                        /api/cases/{{ foreach.item._source.case_id }}/comments
-                      body:
-                        type: "user"
-                        comment: |
+                      case_id: "{{ foreach.item._source.case_id }}"
+                      comment: |
                           ## Action Denied
 
                           **Approval ID:** {{ foreach.item._source.approval_id }}
                           **Action:** {{ foreach.item._source.action_type }} on {{ foreach.item._source.target }}
 
                           This action was denied by a human reviewer. No action has been taken.
-                        owner: "securitySolution"
 
                 else:
 
