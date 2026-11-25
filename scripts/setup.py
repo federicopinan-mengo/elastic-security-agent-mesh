@@ -255,6 +255,53 @@ def validate_env():
     print()
 
 
+def validate_endpoints(timeout=30):
+    """Check that both URLs answer the API they are configured for.
+
+    A Kibana endpoint answers the root path with the product page, so a wrong
+    ELASTIC_CLOUD_URL only shows up later as a 404 on every Elasticsearch call.
+    """
+    problems = []
+    es_url = os.environ["ELASTIC_CLOUD_URL"].rstrip("/")
+    kb_url = os.environ["KIBANA_URL"].rstrip("/")
+
+    try:
+        response = requests.get(es_url + "/", headers=es_headers(), timeout=timeout)
+        version = response.json().get("version", {}).get("number") if response.ok else None
+        if version:
+            print(f"  Elasticsearch API: {version}")
+        else:
+            problems.append(
+                f"{es_url} did not answer as an Elasticsearch endpoint (HTTP {response.status_code})"
+            )
+    except (requests.RequestException, ValueError) as exc:
+        problems.append(f"{es_url} is not reachable: {exc}")
+
+    try:
+        response = requests.get(kb_url + "/api/status", headers=kibana_headers(), timeout=timeout)
+        version = response.json().get("version", {}).get("number") if response.ok else None
+        if version:
+            print(f"  Kibana API:      {version}")
+        else:
+            problems.append(
+                f"{kb_url} did not answer as a Kibana endpoint (HTTP {response.status_code})"
+            )
+    except (requests.RequestException, ValueError) as exc:
+        problems.append(f"{kb_url} is not reachable: {exc}")
+
+    if problems:
+        print("ERROR: The endpoints do not answer the expected API:")
+        for problem in problems:
+            print(f"  - {problem}")
+        print()
+        print(
+            "ELASTIC_CLOUD_URL must be the Elasticsearch endpoint of the deployment and "
+            "KIBANA_URL its Kibana endpoint. See README.md for the exact forms."
+        )
+        sys.exit(1)
+    print()
+
+
 def es_headers():
     return {
         "Content-Type": "application/json",
@@ -2099,6 +2146,7 @@ def main():
     print()
 
     validate_env()
+    validate_endpoints()
 
     if args.validate:
         print("Validation complete.")

@@ -240,6 +240,7 @@ def test_cli_delete_workflows_is_a_dry_run_without_yes(repo, fake_kibana, monkey
     for var in ("ELASTIC_CLOUD_URL", "ES_API_KEY", "KIBANA_URL", "KIBANA_API_KEY"):
         monkeypatch.setenv(var, "https://kibana.example")
     monkeypatch.setattr(sys, "argv", ["setup.py", "--delete-workflows"])
+    monkeypatch.setattr(setup, "validate_endpoints", lambda: None)
 
     setup.main()
 
@@ -251,6 +252,7 @@ def test_cli_delete_workflows_deletes_with_yes(repo, fake_kibana, monkeypatch):
     for var in ("ELASTIC_CLOUD_URL", "ES_API_KEY", "KIBANA_URL", "KIBANA_API_KEY"):
         monkeypatch.setenv(var, "https://kibana.example")
     monkeypatch.setattr(sys, "argv", ["setup.py", "--delete-workflows", "--yes"])
+    monkeypatch.setattr(setup, "validate_endpoints", lambda: None)
 
     setup.main()
 

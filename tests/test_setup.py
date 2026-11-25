@@ -27,6 +27,7 @@ from setup import (
     slugify,
     validate_alert_context_params,
     validate_alert_context_schema,
+    validate_endpoints,
     validate_env,
 )
 
@@ -60,11 +61,12 @@ class TestLoadProjectEnv:
         calls = []
         monkeypatch.setattr("setup.load_project_env", lambda: calls.append("load"))
         monkeypatch.setattr("setup.validate_env", lambda: calls.append("validate"))
+        monkeypatch.setattr("setup.validate_endpoints", lambda: calls.append("endpoints"))
         monkeypatch.setattr("setup.sys.argv", ["setup.py", "--validate"])
 
         main()
 
-        assert calls == ["load", "validate"]
+        assert calls == ["load", "validate", "endpoints"]
 
 
 # =============================================================================
@@ -263,6 +265,70 @@ class TestValidateEnv:
         ):
             # Should not raise
             validate_env()
+
+
+class TestValidateEndpoints:
+    """The endpoint check catches a URL that answers a different product."""
+
+    def _response(self, payload, status=200, content_type="application/json"):
+        response = MagicMock()
+        response.ok = status < 400
+        response.status_code = status
+        response.headers = {"content-type": content_type}
+        response.json.return_value = payload
+        return response
+
+    def _env(self):
+        return {
+            "ELASTIC_CLOUD_URL": "https://test.es.io",
+            "KIBANA_URL": "https://test.kb.io",
+            "ES_API_KEY": "key",
+            "KIBANA_API_KEY": "key",
+        }
+
+    def test_both_endpoints_answer_their_api(self, capsys):
+        with patch.dict(os.environ, self._env(), clear=True):
+            with patch(
+                "setup.requests.get",
+                side_effect=[
+                    self._response({"version": {"number": "9.5.7"}}),
+                    self._response({"version": {"number": "9.5.7"}}),
+                ],
+            ):
+                validate_endpoints()
+        out = capsys.readouterr().out
+        assert "9.5.7" in out
+
+    def test_kibana_url_in_the_elasticsearch_slot_is_rejected(self, capsys):
+        """A Kibana endpoint answers the root path with the product page."""
+        with patch.dict(os.environ, self._env(), clear=True):
+            with patch(
+                "setup.requests.get",
+                side_effect=[
+                    self._response({}, status=200, content_type="text/html"),
+                    self._response({"version": {"number": "9.5.7"}}),
+                ],
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    validate_endpoints()
+        assert exc_info.value.code == 1
+        out = capsys.readouterr().out
+        assert "did not answer as an Elasticsearch endpoint" in out
+
+    def test_unreachable_endpoint_is_rejected(self):
+        import requests
+
+        with patch.dict(os.environ, self._env(), clear=True):
+            with patch(
+                "setup.requests.get",
+                side_effect=[
+                    requests.ConnectionError("no route"),
+                    self._response({"version": {"number": "9.5.7"}}),
+                ],
+            ):
+                with pytest.raises(SystemExit) as exc_info:
+                    validate_endpoints()
+        assert exc_info.value.code == 1
 
 
 # =============================================================================
