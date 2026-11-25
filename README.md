@@ -72,7 +72,7 @@ The setup requires environment variables for your Elastic deployment. You can pr
 
 | Variable | Description |
 |----------|-------------|
-| `ELASTIC_CLOUD_URL` | Elasticsearch endpoint URL |
+| `ELASTIC_CLOUD_URL` | Elasticsearch endpoint URL (the `.es.` host, never the `.kb.` one) |
 | `KIBANA_URL` | Kibana endpoint URL |
 | `LLM_CONNECTOR_ID` | The LLM connector ID for agent-to-agent calls. We recommend **Claude Sonnet 4.5** (`Anthropic-Claude-Sonnet-4-5`) — it's fast, cost-effective, and excellent at tool-calling. **Claude Opus 4.5** (`Anthropic-Claude-Opus-4-5`) is available if you need heavier reasoning but consumes significantly more tokens. Find your connector ID by running `GET kbn:/api/actions/connectors` in Kibana Dev Tools. |
 

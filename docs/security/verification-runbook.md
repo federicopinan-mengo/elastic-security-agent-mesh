@@ -13,7 +13,8 @@ security decisions, so each row below is a gate.
 | --- | --- | --- |
 | Stack version | `curl -s $KIBANA_URL/api/status \| jq -r '.version.number'` | `9.5.7` or newer |
 | Workflows feature | `curl -s $KIBANA_URL/api/workflows?per_page=1 -H "kbn-xsrf: true"` | HTTP 200 |
-| Credentials | `python scripts/setup.py --validate` | every target reports a mode (`api key` or `user/password`) |
+| Endpoint roles | `python scripts/setup.py --validate` | `Elasticsearch API` and `Kibana API` both print a version; a URL that answers the wrong product fails here |
+| Credentials | `python scripts/setup.py --validate` | every target reports a mode (`api key` or `user/password`), and both endpoints answer with their own version |
 | Connectors | `curl -s $KIBANA_URL/api/actions/connectors -H "kbn-xsrf: true"` | `oputils-virustotal`, `oputils-abuseipdb` |
 | Local suite | `python -m pytest tests/ -q` | green, no failures |
 
